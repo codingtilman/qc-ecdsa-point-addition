@@ -15,3 +15,5 @@ timestamp	commit	toffoli	clifford	qubits	ops	correct	notes
 1793179897	7b74162	3128325.000	17735127.677	2715	22438457	OK	round 6: statistical uv width bound in Kaliski (K=7)
 1793180059	cf35186	3092261.000	17611474.200	2715	22272283	OK	round 7: statistical r/s width bound in Kaliski (K=7, i<300)
 1793180310	0251e41	3062197.000	17461857.726	2715	22099671	OK	round 8: chunked 2^22/2^-32 in affine Solinas tails
+1793180421	55ca780	3054681.000	17424457.786	2745	22056518	OK	round 9: chunked Solinas tail in pair2 Karatsuba mul-add
+1793180610	55ca780	3057902.000	17451755.152	2715	22044686	OK	round 10: all Kaliski iterations in bulk form (post-termination exact), f flag cleared in envelope

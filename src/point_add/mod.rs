@@ -4021,7 +4021,15 @@ fn bulk_prefix_safe_iters() -> usize {
 }
 
 fn bulk_prefix_caps(pair: KalPair) -> BulkPrefixCaps {
-    let mut forward = bulk_prefix_safe_iters();
+    // The bulk iteration is also exact after termination: with v = 0 it
+    // reduces to the "v even" branch (v stays 0, r doubles mod p, and a_f
+    // uncomputes because s = p is odd). So both point-add pairs run every
+    // iteration in bulk form; with_kal_inv_raw_coeff_caps then clears the
+    // never-toggled f flag itself.
+    let mut forward = match pair {
+        KalPair::Default => bulk_prefix_safe_iters(),
+        KalPair::Pair1 | KalPair::Pair2 => env_usize("KAL_BULK3_ITERS").unwrap_or(usize::MAX),
+    };
     let mut backward = forward;
 
     let (pair_all, pair_fwd, pair_bk) = match pair {
@@ -4069,8 +4077,8 @@ fn bulk_prefix_caps(pair: KalPair) -> BulkPrefixCaps {
         && env_usize("KAL_PAIR1_BULK3_FWD_ITERS").is_none()
         && env_usize("KAL_PAIR1_BULK3_BK_ITERS").is_none()
     {
-        forward = 378;
-        backward = 378;
+        forward = usize::MAX;
+        backward = usize::MAX;
     }
 
     BulkPrefixCaps { forward, backward }
@@ -9280,10 +9288,16 @@ fn with_kal_inv_raw_coeff_caps<F: FnOnce(&mut B, &[QubitId])>(
     // available for clean branch-flag uncomputation.
     kaliski_forward_with_coeff_caps(b, v_in, &st, p, iters, coeff, bulk_caps);
 
+    // All-bulk runs never toggle f, so it is still at its initial 1.
+    let f_untouched =
+        bulk_prefix_enabled() && bulk_caps.forward >= iters && bulk_caps.backward >= iters;
     if !keep_v {
         b.free_vec(&st.v_w);
     }
     if !keep_f {
+        if f_untouched {
+            b.x(st.f_flag);
+        }
         b.free(st.f_flag);
     }
     if !keep_u {
@@ -9310,6 +9324,9 @@ fn with_kal_inv_raw_coeff_caps<F: FnOnce(&mut B, &[QubitId])>(
     }
     if !keep_f {
         st.f_flag = b.alloc_qubit();
+        if f_untouched {
+            b.x(st.f_flag);
+        }
     }
     if !keep_v {
         st.v_w = b.alloc_qubits(n);
