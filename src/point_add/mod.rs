@@ -3891,7 +3891,14 @@ fn mulmod(a: U256, b: U256, p: U256) -> U256 {
 /// (since max(r,s) doubles per iter starting from max=1, so max ≤ 2^iter_idx).
 /// In that range, mod_double(r)'s Solinas cadd is identity — replace with
 /// a plain shift (0 Toffoli) for ~255 CCX savings per iter.
-const R_SMALL_THRESHOLD: usize = 262;
+///
+/// Beyond 2^iter, the Kaliski invariant p = u*s + v*r (u, v >= 1) keeps
+/// r, s <= p before termination, so the doubled register was <= p/2 and its
+/// top bit is 0 for every step before the terminating one. The threshold is
+/// therefore safe whenever termination happens after it: random inputs
+/// terminate at 362 +/- 9.5 steps (min 316 over 1e6 samples, ~1e-9
+/// extrapolated tail at 300), far below the existing 404-cap overrun rate.
+const R_SMALL_THRESHOLD: usize = 300;
 
 fn r_small_threshold() -> usize {
     std::env::var("KAL_R_SMALL_THRESHOLD")
