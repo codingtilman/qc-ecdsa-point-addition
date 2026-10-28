@@ -70,6 +70,7 @@ use crate::sim::Simulator;
 use crate::weierstrass_elliptic_curve::WeierstrassEllipticCurve;
 
 mod fermat_inv;
+mod pow2_scale;
 mod venting;
 
 struct B {
@@ -9740,9 +9741,7 @@ fn build_standard_point_add(
             b.set_phase("pair1_mul1");
             pair1_mul1_write_into_zero_acc(b, &lam_inner, &ty, inv_raw, p);
             b.set_phase("pair1_halve");
-            for _ in 0..pair1_iters {
-                mod_halve_inplace_fast(b, &lam_inner, p);
-            }
+            pow2_scale::mod_halve_pow2(b, &lam_inner, p, pair1_iters);
             if affine_combined_y {
                 b.set_phase("pair1_mul2_deferred_combined_y");
             } else {
