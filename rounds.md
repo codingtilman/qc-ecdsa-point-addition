@@ -6,3 +6,4 @@
 | 3 | round-2 chunked pair2 doubling + pair2 Kaliski iters 400→404 (round-2 failure traced to an input needing exactly 400 steps) | 3791295 | 20906294.456 | 2715 | 10293365925 | yes |
 | 4 | Kaliski no-correction r-doubling threshold 262→300 (invariant r,s≤p before termination; P(t≤300)≈1e-9) | 3752535 | 20534880.600 | 2715 | 10188132525 | yes |
 | 5 | pow2_scale: chunks up to k=32 and reuse g·c register for the reduction flag (W'=W+(1-F)c) | 3743207 | 20432553.719 | 2715 | 10162807005 | yes |
+| 6 | statistical u/v width bound in all Kaliski uv ops: min(exact, ceil(256-0.708i+7(0.36√i+1))); 0 exceedances in 1.2M sampled inversions, ~1e-10 extrapolated | 3128325 | 17735127.677 | 2715 | 8493402375 | yes |

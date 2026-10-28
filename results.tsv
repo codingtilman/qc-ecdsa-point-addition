@@ -12,3 +12,4 @@ timestamp	commit	toffoli	clifford	qubits	ops	correct	notes
 1793177459	50f9309	3791295.000	20906294.456	2715	26776445	OK	round 3: chunked 2^k doubling for pair2 + pair2 iters 404
 1793177823	860a72e	3752535.000	20534880.600	2715	26346893	OK	round 4: R_SMALL_THRESHOLD 262->300 (Kaliski invariant)
 1793177934	aff5162	3743207.000	20432553.719	2715	26217637	OK	round 5: pow2_scale k=32 chunks + reuse g*c for flag
+1793179897	7b74162	3128325.000	17735127.677	2715	22438457	OK	round 6: statistical uv width bound in Kaliski (K=7)
