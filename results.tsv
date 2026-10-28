@@ -8,3 +8,5 @@ timestamp	commit	toffoli	clifford	qubits	ops	correct	notes
 1780052385	196206e	3962753.000	22627113.285	2715	28697222	OK	
 1793176179	784ecfa	3942753.000	22627118.169	2715	28677221	OK	round 0: remove harness padding
 1793177001	0c1cc14	3858732.000	21722226.718	2715	27666293	OK	round 1: chunked Montgomery 2^-k halving for pair1
+1793177083	50f9309	3775667.000	20827537.498	2715	26666987	FAIL	round 2: chunked Montgomery 2^k doubling for pair2 | PHASE GARBAGE: global_phase = 0x0000000200000000 across 64 live shots (must be 0)
+1793177459	50f9309	3791295.000	20906294.456	2715	26776445	OK	round 3: chunked 2^k doubling for pair2 + pair2 iters 404

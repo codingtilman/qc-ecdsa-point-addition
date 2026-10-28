@@ -9448,11 +9448,10 @@ fn build_standard_point_add(
     // exact checked setting.  For the normal exact path, full-harness probes
     // after the R_SMALL_THRESHOLD=260 update found pair2=400 clean; pair2=399
     // remains outside the verified safety margin.
-    let pair2_default = if tagged_div_validate || pair2_branch_inv {
-        404
-    } else {
-        400
-    };
+    // Chunked pair2 doubling made the 400 cap's ~1e-4/shot overrun (inputs
+    // needing exactly 400 Kaliski steps) show up in the harness; 404 matches
+    // pair1's margin and costs only a few thousand Toffoli.
+    let pair2_default = 404;
     let pair2_iters = std::env::var("KAL_PAIR2_ITERS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
@@ -9863,9 +9862,7 @@ fn build_standard_point_add(
             } else {
                 with_kal_inv_raw_pair(b, &tx, p, pair2_iters, KalPair::Pair2, |b, inv_raw| {
                     b.set_phase("pair2_double");
-                    for _ in 0..pair2_iters {
-                        mod_double_inplace_fast(b, &lam, p);
-                    }
+                    pow2_scale::mod_double_pow2(b, &lam, p, pair2_iters);
                     b.set_phase("pair2_mul");
                     pair2_mul_add_into_acc(b, &lam, inv_raw, &ty, p);
                     b.set_phase("pair2_cleanup");

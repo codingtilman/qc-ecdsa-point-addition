@@ -249,7 +249,6 @@ pub(super) fn mod_halve_pow2(b: &mut B, v: &[QubitId], p: U256, count: usize) {
 }
 
 /// `v := v * 2^count mod p`.
-#[allow(dead_code)]
 pub(super) fn mod_double_pow2(b: &mut B, v: &[QubitId], p: U256, count: usize) {
     let (ks, singles) = chunks(count);
     for _ in 0..singles {
@@ -257,5 +256,152 @@ pub(super) fn mod_double_pow2(b: &mut B, v: &[QubitId], p: U256, count: usize) {
     }
     for k in ks.into_iter().rev() {
         mod_double_by_k(b, v, k);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::circuit::QubitOrBit;
+    use crate::sim::Simulator;
+    use sha3::digest::{ExtendableOutput, Update};
+
+    fn p() -> U256 {
+        super::super::SECP256K1_P
+    }
+
+    fn pow2(k: usize) -> U256 {
+        U256::from(1u64) << k
+    }
+
+    fn mulmod(a: U256, b: U256) -> U256 {
+        a.mul_mod(b, p())
+    }
+
+    fn run(op: &dyn Fn(&mut B, &[QubitId]), inputs: &[U256]) -> Vec<(U256, bool, bool)> {
+        let mut b = B::new();
+        let x = b.alloc_qubits(256);
+        op(&mut b, &x);
+        let ops = b.ops.clone();
+        let total_qubits = b.next_qubit as usize;
+        let num_bits = b.next_bit as usize;
+        let reg: Vec<QubitOrBit> = x.iter().map(|&q| QubitOrBit::Qubit(q)).collect();
+        let mut h = sha3::Shake256::default();
+        h.update(b"pow2-test");
+        let mut xof = h.finalize_xof();
+        let mut sim = Simulator::new(total_qubits, num_bits, &mut xof);
+        let mut out = Vec::new();
+        for chunk in inputs.chunks(64) {
+            sim.clear_for_shot();
+            for (s, &v) in chunk.iter().enumerate() {
+                sim.set_register(&reg, v, s);
+            }
+            sim.apply_iter(ops.iter());
+            for s in 0..chunk.len() {
+                let got = sim.get_register(&reg, s);
+                let phase_bad = (sim.phase >> s) & 1 == 1;
+                let mut dirty = false;
+                for q in 0..total_qubits {
+                    if x.iter().any(|xq| xq.0 as usize == q) {
+                        continue;
+                    }
+                    if (sim.qubits[q] >> s) & 1 == 1 {
+                        dirty = true;
+                    }
+                }
+                out.push((got, phase_bad, dirty));
+            }
+        }
+        out
+    }
+
+    fn inputs() -> Vec<U256> {
+        let mut v = vec![
+            U256::ZERO,
+            U256::from(1u64),
+            U256::from(2u64),
+            p() - U256::from(1u64),
+            p() - U256::from(2u64),
+            p() >> 1,
+            (p() >> 1) + U256::from(1u64),
+        ];
+        // Inputs near the reduction boundary for every chunk size.
+        for k in 1..=MAX_CHUNK {
+            let top = p() >> (256 - k);
+            for dh in 0..3u64 {
+                for dl in 0..3u64 {
+                    let h = top.wrapping_sub(U256::from(dh));
+                    let lo = (pow2(256 - k) - U256::from(1u64)).wrapping_sub(U256::from(dl));
+                    let x = (h << (256 - k)) | lo;
+                    if x < p() {
+                        v.push(x);
+                    }
+                }
+            }
+        }
+        let mut s: u64 = 0x1234_5678_9abc_def1;
+        while v.len() < 64 * 12 {
+            let mut limbs = [0u64; 4];
+            for l in &mut limbs {
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                *l = s;
+            }
+            let x = U256::from_limbs(limbs);
+            if x < p() {
+                v.push(x);
+            }
+        }
+        v
+    }
+
+    fn check(name: &str, count: usize, double: bool) {
+        let ins = inputs();
+        let res = if double {
+            run(&|b, x| mod_double_pow2(b, x, p(), count), &ins)
+        } else {
+            run(&|b, x| mod_halve_pow2(b, x, p(), count), &ins)
+        };
+        let f = if double {
+            let mut r = U256::from(1u64);
+            for _ in 0..count {
+                r = mulmod(r, U256::from(2u64));
+            }
+            r
+        } else {
+            // 2^-count = ((p+1)/2)^count
+            let half = (p() + U256::from(1u64)) >> 1;
+            let mut r = U256::from(1u64);
+            for _ in 0..count {
+                r = mulmod(r, half);
+            }
+            r
+        };
+        let mut bad = 0;
+        for (i, (&x, &(got, ph, dirty))) in ins.iter().zip(res.iter()).enumerate() {
+            let exp = mulmod(x, f);
+            if got != exp || ph || dirty {
+                bad += 1;
+                if bad < 5 {
+                    eprintln!("{name} input#{i} x={x:#x} got={got:#x} exp={exp:#x} phase={ph} dirty={dirty}");
+                }
+            }
+        }
+        assert_eq!(bad, 0, "{name}: {bad} bad shots");
+    }
+
+    #[test]
+    fn halve_chunks() {
+        for &c in &[4usize, 8, 21, 22, 404] {
+            check("halve", c, false);
+        }
+    }
+
+    #[test]
+    fn double_chunks() {
+        for &c in &[4usize, 8, 21, 22, 400] {
+            check("double", c, true);
+        }
     }
 }
