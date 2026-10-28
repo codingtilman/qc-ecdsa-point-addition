@@ -3918,6 +3918,35 @@ fn uv_width_bound(n: usize, iter_idx: usize) -> usize {
     exact.min(stat)
 }
 
+/// Statistical bound on max(bitlen r, bitlen s) at the END of iteration
+/// `i`: mean 1.5 + 0.708*i, spread ~0.36*sqrt(i), margin K = 7 (max K seen
+/// over 1.2M sampled inversions was 4.3). Only valid before termination
+/// (s jumps to p there), so it is applied below r_small_threshold(), the
+/// same no-early-termination assumption the r doubling already relies on.
+fn rs_stat_end(n: usize, i: usize) -> usize {
+    if n != 256 || i >= r_small_threshold() {
+        return n;
+    }
+    let x = i as f64;
+    let stat = (1.5 + 0.708 * x + 7.0 * (0.36 * x.sqrt() + 1.0)).ceil() as usize;
+    stat.min(n)
+}
+
+/// Width holding r and s at the start of iteration `iter_idx`.
+fn rs_width_start(n: usize, iter_idx: usize) -> usize {
+    let exact = (iter_idx + 1).min(n);
+    if iter_idx == 0 {
+        exact
+    } else {
+        exact.min(rs_stat_end(n, iter_idx - 1))
+    }
+}
+
+/// Width holding r and s at the end of iteration `iter_idx`.
+fn rs_width_end(n: usize, iter_idx: usize) -> usize {
+    (iter_idx + 2).min(n).min(rs_stat_end(n, iter_idx))
+}
+
 fn r_small_threshold() -> usize {
     std::env::var("KAL_R_SMALL_THRESHOLD")
         .ok()
@@ -6435,11 +6464,7 @@ fn kaliski_iteration_bulk_prefix3(
     for j in 0..uv_width_step3 {
         cswap(b, a_f, u[j], v_w[j]);
     }
-    let rs_width_step3 = if iter_idx + 1 < u.len() {
-        iter_idx + 1
-    } else {
-        u.len()
-    };
+    let rs_width_step3 = rs_width_start(u.len(), iter_idx);
     for j in 0..rs_width_step3 {
         cswap(b, a_f, r[j], s[j]);
     }
@@ -6465,7 +6490,7 @@ fn kaliski_iteration_bulk_prefix3(
         // Narrow load/sub width to the late-iter bound.
         // Both tmp and v_w are 256 qubits. Use slice [0..load_width] for each.
         sub_nbit_qq_fast(b, &tmp[..load_width], &v_w[..load_width]);
-        let transform_width = if iter_idx + 1 < n { iter_idx + 1 } else { n };
+        let transform_width = rs_width_start(n, iter_idx);
         for i in 0..transform_width {
             b.cx(r[i], u[i]);
         }
@@ -6475,7 +6500,7 @@ fn kaliski_iteration_bulk_prefix3(
         for i in 0..transform_width {
             b.cx(r[i], u[i]);
         }
-        let add_width = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+        let add_width = rs_width_end(n, iter_idx);
         let mut tmp_slice: Vec<QubitId> = tmp[0..transform_width].to_vec();
         let tmp_pad = if add_width > transform_width {
             let q = b.alloc_qubit();
@@ -6536,11 +6561,7 @@ fn kaliski_iteration_bulk_prefix3(
     for j in 0..uv_width_step9 {
         cswap(b, a_f, u[j], v_w[j]);
     }
-    let rs_width_step9 = if iter_idx + 2 < u.len() {
-        iter_idx + 2
-    } else {
-        u.len()
-    };
+    let rs_width_step9 = rs_width_end(u.len(), iter_idx);
     for j in 0..rs_width_step9 {
         cswap(b, a_f, r[j], s[j]);
     }
@@ -6654,7 +6675,7 @@ fn kaliski_iteration(
     for j in 0..uv_width {
         cswap(b, a_f, u[j], v_w[j]);
     }
-    let rs_width_step3 = if iter_idx + 1 < n { iter_idx + 1 } else { n };
+    let rs_width_step3 = rs_width_start(n, iter_idx);
     for j in 0..rs_width_step3 {
         cswap(b, a_f, r[j], s[j]);
     }
@@ -6691,7 +6712,7 @@ fn kaliski_iteration(
         // useless extra CCX on a known-zero r bit.
         // Late-iter: full transform (r unbounded but u high bits 0 so CCX at
         // high bits effectively produces add_f AND r from tmp=0).
-        let transform_width = if iter_idx + 1 < n { iter_idx + 1 } else { n };
+        let transform_width = rs_width_start(n, iter_idx);
         for i in 0..transform_width {
             b.cx(r[i], u[i]);
         }
@@ -6703,7 +6724,7 @@ fn kaliski_iteration(
         }
         // Add s += tmp. Small-iter still needs one extra carry slot above the
         // live r bits, but that top input bit is known 0.
-        let add_width = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+        let add_width = rs_width_end(n, iter_idx);
         let mut tmp_slice: Vec<QubitId> = tmp[0..transform_width].to_vec();
         let tmp_pad = if add_width > transform_width {
             let q = b.alloc_qubit();
@@ -6782,7 +6803,7 @@ fn kaliski_iteration(
     for j in 0..uv_width {
         cswap(b, a_f, u[j], v_w[j]);
     }
-    let rs_width_step9 = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+    let rs_width_step9 = rs_width_end(n, iter_idx);
     for j in 0..rs_width_step9 {
         cswap(b, a_f, r[j], s[j]);
     }
@@ -7178,7 +7199,7 @@ fn kaliski_iteration_bulk_prefix3_backward(
 
     // Reverse STEP 9.
     b.set_phase("bk_bulk_step9_cswap");
-    let rs_width_step9 = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+    let rs_width_step9 = rs_width_end(n, iter_idx);
     for j in (0..rs_width_step9).rev() {
         cswap(b, a_f, r[j], s[j]);
     }
@@ -7217,11 +7238,11 @@ fn kaliski_iteration_bulk_prefix3_backward(
     b.set_phase("bk_bulk_step4");
     {
         let tmp = b.alloc_qubits(n);
-        let load_width = if iter_idx + 1 < n { iter_idx + 1 } else { n };
+        let load_width = rs_width_start(n, iter_idx);
         for i in 0..load_width {
             b.ccx(add_f, r[i], tmp[i]);
         }
-        let sub_width = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+        let sub_width = rs_width_end(n, iter_idx);
         let tmp_sub_slice: Vec<QubitId> = tmp[0..sub_width].to_vec();
         let s_slice: Vec<QubitId> = s[0..sub_width].to_vec();
         if std::env::var("KAL_VENT_MODADD").ok().as_deref() == Some("1") {
@@ -7271,7 +7292,7 @@ fn kaliski_iteration_bulk_prefix3_backward(
 
     // Reverse STEP 3.
     b.set_phase("bk_bulk_step3_cswap");
-    let rs_width_step3 = if iter_idx + 1 < n { iter_idx + 1 } else { n };
+    let rs_width_step3 = rs_width_start(n, iter_idx);
     for j in (0..rs_width_step3).rev() {
         cswap(b, a_f, r[j], s[j]);
     }
@@ -7348,7 +7369,7 @@ fn kaliski_iteration_backward(
     b.x(s[0]);
 
     // ── Reverse STEP 9 ─────────────────────────────────────────────────
-    let rs_width_step9 = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+    let rs_width_step9 = rs_width_end(n, iter_idx);
     let uv_width = uv_width_bound(n, iter_idx);
     b.set_phase("bk_step9_cswap");
     for j in (0..rs_width_step9).rev() {
@@ -7387,12 +7408,12 @@ fn kaliski_iteration_backward(
     {
         let tmp = b.alloc_qubits(n);
         // Load tmp = AND(add_f, r). Small-iter: r[i]=0 for i >= iter+1.
-        let load_width = if iter_idx + 1 < n { iter_idx + 1 } else { n };
+        let load_width = rs_width_start(n, iter_idx);
         for i in 0..load_width {
             b.ccx(add_f, r[i], tmp[i]);
         }
         // Reversed (F): sub tmp from s. Small-iter width iter+2.
-        let sub_width = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+        let sub_width = rs_width_end(n, iter_idx);
         let tmp_sub_slice: Vec<QubitId> = tmp[0..sub_width].to_vec();
         let s_slice: Vec<QubitId> = s[0..sub_width].to_vec();
         if std::env::var("KAL_VENT_MODADD").ok().as_deref() == Some("1") {
@@ -7451,7 +7472,7 @@ fn kaliski_iteration_backward(
 
     b.set_phase("bk_step3_cswap");
     // Reverse STEP 3 ─────────────────────────────────────────────────
-    let rs_width_step3 = if iter_idx + 1 < n { iter_idx + 1 } else { n };
+    let rs_width_step3 = rs_width_start(n, iter_idx);
     let uv_width = uv_width_bound(n, iter_idx);
     for j in (0..rs_width_step3).rev() {
         cswap(b, a_f, r[j], s[j]);
