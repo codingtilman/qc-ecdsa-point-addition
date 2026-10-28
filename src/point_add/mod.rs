@@ -10059,36 +10059,6 @@ pub fn build() -> Vec<Op> {
     }
 
 
-    // ── DUMMY_TOFFOLIS: noise-injection knob for harness sensitivity tests.
-    // Adds N pairs of CCX(a, b, c) followed by CCX(a, b, c) which cancel
-    // exactly (Toffoli is self-inverse). Net circuit effect: identity.
-    // Each pair contributes 2 to the executed-Toffoli count (per shot, since
-    // a, b are constant 1 placeholders). a=tx[0], b=ty[0], c=ox[0]
-    // are taken from the declared registers — no extra qubit allocations,
-    // peak qubit count unchanged.
-    {
-        let n: usize = std::env::var("DUMMY_TOFFOLIS")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(10_000);
-        if n > 0 {
-            // Pick three distinct register entries — anything works as long
-            // as the pair self-cancels.
-            let a = tx[0];
-            let bq = ty[0];
-            // Use a fresh ancilla as the target so we don't disturb output
-            // registers. The ancilla is forced to |0⟩ before the dummy block
-            // (since the algorithm has already produced its outputs above)
-            // and the paired CCXs preserve that.
-            let c = b.alloc_qubit();
-            for _ in 0..n {
-                b.ccx(a, bq, c);
-                b.ccx(a, bq, c);
-            }
-            b.free(c);
-        }
-    }
-
     if std::env::var("TRACE_PHASE_LOCAL_PEAK").is_ok() {
         for (ph, (a, op)) in b.phase_local_peaks.iter() {
             eprintln!("LOCAL_PHASE_PEAK phase='{}' active={} ops_idx={}", ph, a, op);
