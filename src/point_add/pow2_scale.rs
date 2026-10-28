@@ -2,7 +2,7 @@
 //!
 //! `mod_halve_by_k` computes `y := y * 2^-k mod p` in place with one
 //! Montgomery-style reduction step instead of k single halvings. With
-//! p = 2^256 - c, c = 2^32 + 977, and k <= 22:
+//! p = 2^256 - c, c = 2^32 + 977, and k <= 32 (so -p = 977 mod 2^k):
 //!
 //!   g = (y mod 2^k) * 977^-1 mod 2^k        (so y - g*c = 0 mod 2^k)
 //!   y - g*c = lo*2^k - F*2^256               (F = borrow bit)
@@ -11,17 +11,19 @@
 //! F is uncomputed from the result as F = [lo*2^k + h*c >= p] with
 //! h = g - F, i.e. the carry-out of lo*2^k + h*c + c.
 //!
-//! Cost is ~1.1k Toffoli per 22-bit chunk versus ~5.6k for 22 single
-//! halvings. `mod_double_by_k` is the exact mirror.
+//! The g*c register built for the subtraction is reused for the flag:
+//! h*c + c = g*c + (1 - F)*c. Cost is ~1.1k Toffoli per 32-bit chunk versus
+//! ~8.2k for 32 single halvings. `mod_double_by_k` is the exact mirror.
 
 use alloy_primitives::U256;
 
 use super::{
-    add_nbit_const_fast, add_nbit_qq_fast, cmp_lt_into_fast, mod_double_inplace_fast,
-    mod_halve_inplace_fast, sub_nbit_const_fast, sub_nbit_qq_fast, QubitId, B,
+    add_nbit_const_fast, add_nbit_qq_fast, cadd_nbit_const_fast, cmp_lt_into_fast,
+    csub_nbit_const_fast, mod_double_inplace_fast, mod_halve_inplace_fast, sub_nbit_const_fast,
+    sub_nbit_qq_fast, QubitId, B,
 };
 
-pub(super) const MAX_CHUNK: usize = 22;
+pub(super) const MAX_CHUNK: usize = 32;
 /// Below this many steps the single-bit doubling/halving is cheaper.
 const MIN_CHUNK: usize = 4;
 const C977: u64 = 977;
@@ -96,20 +98,27 @@ fn mul_const_mod2k(b: &mut B, src: &[QubitId], dst: &[QubitId], a: u64, undo: bo
 }
 
 /// `w := h * c` (c = 2^32 + 977) for zero `w`; `undo` clears it again.
-/// Requires h.len() + 10 <= 32 so the two terms occupy disjoint bits.
+/// For k <= 22 the two terms occupy disjoint bits and the 2^32 term is a
+/// plain copy; above that it is added.
 fn times_c(b: &mut B, h: &[QubitId], w: &[QubitId], undo: bool) {
     let k = h.len();
-    assert!(k + 10 <= 32 && w.len() >= 32 + k);
+    assert!(w.len() >= k + 34);
     let lowp = &w[..k + 10];
+    let disjoint = k + 10 <= 32;
+    let hi_term = |b: &mut B, sub: bool| {
+        if disjoint {
+            for i in 0..k {
+                b.cx(h[i], w[32 + i]);
+            }
+        } else {
+            add_shifted(b, h, &w[..k + 34], 32, sub);
+        }
+    };
     if !undo {
         mul_const_mod2k(b, h, lowp, C977, false);
-        for i in 0..k {
-            b.cx(h[i], w[32 + i]);
-        }
+        hi_term(b, false);
     } else {
-        for i in 0..k {
-            b.cx(h[i], w[32 + i]);
-        }
+        hi_term(b, true);
         mul_const_mod2k(b, h, lowp, C977, true);
     }
 }
@@ -133,24 +142,19 @@ fn rotate_down(b: &mut B, v: &[QubitId], k: usize) {
     reverse(b, v);
 }
 
-/// ext ^= carry-out of (r + h*c + c) over 2^256, where r = v with low k bits 0.
-fn toggle_reduction_flag(b: &mut B, v: &[QubitId], g: &[QubitId], ext: QubitId) {
-    let n = v.len();
-    let k = g.len();
-    let c = U256::from((1u64 << 32) + C977);
-    let w = b.alloc_qubits(n);
-    times_c(b, g, &w, false);
-    add_nbit_const_fast(b, &w[..k + 34], c);
+fn c_const() -> U256 {
+    U256::from((1u64 << 32) + C977)
+}
+
+/// ext ^= carry-out of (r + w) over 2^256, where r = v (low k bits 0).
+fn toggle_carry_flag(b: &mut B, v: &[QubitId], w: &[QubitId], ext: QubitId) {
     for &q in v {
         b.x(q);
     }
-    cmp_lt_into_fast(b, v, &w, ext);
+    cmp_lt_into_fast(b, v, &w[..v.len()], ext);
     for &q in v {
         b.x(q);
     }
-    sub_nbit_const_fast(b, &w[..k + 34], c);
-    times_c(b, g, &w, true);
-    b.free_vec(&w);
 }
 
 /// `v := v * 2^-k mod p` for v < p, 1 <= k <= MAX_CHUNK.
@@ -167,10 +171,9 @@ fn mod_halve_by_k(b: &mut B, v: &[QubitId], k: usize) {
 
     // v_ext -= g*c  ->  F*2^256 + lo*2^k (low k bits now zero).
     let w = b.alloc_qubits(n + 1);
+    let wc = &w[..k + 34];
     times_c(b, &g, &w, false);
     sub_nbit_qq_fast(b, &w, &v_ext);
-    times_c(b, &g, &w, true);
-    b.free_vec(&w);
 
     // g -= F  ->  h.
     let d = b.alloc_qubits(k);
@@ -179,9 +182,15 @@ fn mod_halve_by_k(b: &mut B, v: &[QubitId], k: usize) {
     b.cx(ext, d[0]);
     b.free_vec(&d);
 
-    // F = carry(lo*2^k + h*c + c); clear it.
-    toggle_reduction_flag(b, v, &g, ext);
+    // w = g*c + (1-F)*c = (h+1)*c; F = carry(lo*2^k + w) clears ext.
+    b.x(ext);
+    cadd_nbit_const_fast(b, wc, c_const(), ext);
+    b.x(ext);
+    toggle_carry_flag(b, v, &w, ext);
     b.free(ext);
+    sub_nbit_const_fast(b, wc, c_const());
+    times_c(b, &g, &w, true);
+    b.free_vec(&w);
 
     // Move h into the (zero) low bits and rotate it to the top.
     for i in 0..k {
@@ -205,7 +214,17 @@ fn mod_double_by_k(b: &mut B, v: &[QubitId], k: usize) {
     let mut v_ext = v.to_vec();
     v_ext.push(ext);
 
-    toggle_reduction_flag(b, v, &g, ext);
+    // w = (h+1)*c; ext = F = carry(lo*2^k + w).
+    let w = b.alloc_qubits(n + 1);
+    let wc = &w[..k + 34];
+    times_c(b, &g, &w, false);
+    add_nbit_const_fast(b, wc, c_const());
+    toggle_carry_flag(b, v, &w, ext);
+
+    // w -= (1-F)*c  ->  (h+F)*c = g*c.
+    b.x(ext);
+    csub_nbit_const_fast(b, wc, c_const(), ext);
+    b.x(ext);
 
     // h += F  ->  g.
     let d = b.alloc_qubits(k);
@@ -214,8 +233,6 @@ fn mod_double_by_k(b: &mut B, v: &[QubitId], k: usize) {
     b.cx(ext, d[0]);
     b.free_vec(&d);
 
-    let w = b.alloc_qubits(n + 1);
-    times_c(b, &g, &w, false);
     add_nbit_qq_fast(b, &w, &v_ext);
     times_c(b, &g, &w, true);
     b.free_vec(&w);
@@ -393,14 +410,14 @@ mod tests {
 
     #[test]
     fn halve_chunks() {
-        for &c in &[4usize, 8, 21, 22, 404] {
+        for &c in &[4usize, 8, 22, 23, 31, 32, 404] {
             check("halve", c, false);
         }
     }
 
     #[test]
     fn double_chunks() {
-        for &c in &[4usize, 8, 21, 22, 400] {
+        for &c in &[4usize, 8, 22, 23, 31, 32, 404] {
             check("double", c, true);
         }
     }
