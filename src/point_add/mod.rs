@@ -3198,13 +3198,11 @@ fn mod_mul_add_into_acc_schoolbook(
         mod_double_inplace_fast(b, &hi, p);
     }
     mod_add_qq_fast(b, acc, &hi, p); // position 10
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    // Clean chunked 2^22 step to position 32, then one 2^-32 step back.
+    pow2_scale::mod_double_pow2(b, &hi, p, 22);
     mod_add_qq(b, acc, &hi, p); // position 32
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
     b.set_phase("sol_halve_tail");
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    pow2_scale::mod_halve_pow2(b, &hi, p, 32);
 
     b.set_phase("schoolbook_mul_inverse");
     schoolbook_mul_into_addsub_inverse(b, x, y, &tmp_ext);
@@ -3336,12 +3334,11 @@ fn mod_add_solinas_ext_product(b: &mut B, acc: &[QubitId], tmp_ext: &[QubitId], 
         mod_double_inplace_fast(b, &hi, p);
     }
     mod_add_qq_fast(b, acc, &hi, p);
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    // Clean chunked 2^22 step to position 32, then one 2^-32 step back
+    // (replaces the garbage-keeping shift22 pair plus 10 single halvings).
+    pow2_scale::mod_double_pow2(b, &hi, p, 22);
     mod_add_qq(b, acc, &hi, p);
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    pow2_scale::mod_halve_pow2(b, &hi, p, 32);
 }
 
 fn mod_sub_solinas_ext_product(b: &mut B, acc: &[QubitId], tmp_ext: &[QubitId], p: U256) {
@@ -3364,12 +3361,11 @@ fn mod_sub_solinas_ext_product(b: &mut B, acc: &[QubitId], tmp_ext: &[QubitId], 
         mod_double_inplace_fast(b, &hi, p);
     }
     mod_sub_qq_fast(b, acc, &hi, p);
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    // Clean chunked 2^22 step to position 32, then one 2^-32 step back
+    // (replaces the garbage-keeping shift22 pair plus 10 single halvings).
+    pow2_scale::mod_double_pow2(b, &hi, p, 22);
     mod_sub_qq(b, acc, &hi, p);
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    pow2_scale::mod_halve_pow2(b, &hi, p, 32);
 }
 
 fn square_tx_and_combined_ty_l2minus3qx(
