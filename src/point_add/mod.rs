@@ -422,7 +422,7 @@ fn pair1_mul1_karatsuba_enabled(n: usize) -> bool {
         .unwrap_or(256);
     point_add_karatsuba_enabled()
         && n >= min_n
-        && env_flag_enabled("KAL_PAIR1_MUL1_KARATSUBA", true)
+        && env_flag_enabled("KAL_PAIR1_MUL1_KARATSUBA", false)
 }
 
 fn direct_const_halve_enabled() -> bool {
@@ -431,7 +431,7 @@ fn direct_const_halve_enabled() -> bool {
     // pair1_mul1 Karatsuba can hit a phase-cleanliness cliff on alternate
     // seeds.  Prefer the revived Karatsuba win by default; both knobs remain
     // independently overrideable for diagnostics.
-    env_flag_enabled("KAL_DIRECT_CONST_HALVE", !pair1_mul1_karatsuba_enabled(N))
+    env_flag_enabled("KAL_DIRECT_CONST_HALVE", false)
 }
 
 fn pair1_mul2_karatsuba_enabled(n: usize) -> bool {
@@ -451,7 +451,7 @@ fn pair2_mul_karatsuba_enabled(n: usize) -> bool {
         .unwrap_or(256);
     point_add_karatsuba_enabled()
         && n >= min_n
-        && env_flag_enabled("KAL_PAIR2_MUL_KARATSUBA", true)
+        && env_flag_enabled("KAL_PAIR2_MUL_KARATSUBA", false)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4024,6 +4024,11 @@ fn bulk_prefix_caps(pair: KalPair) -> BulkPrefixCaps {
     }
 
     BulkPrefixCaps { forward, backward }
+}
+
+/// Lazy history / width release / no-STEP-0 drivers (kaliski_frame.rs).
+fn kal_frame_lazy_enabled() -> bool {
+    env_flag_enabled("KAL_FRAME_LAZY", true)
 }
 
 /// Lazy (u, v_w) frame Kaliski iterations (see kaliski_frame.rs).
@@ -9284,7 +9289,12 @@ fn with_kal_inv_raw_coeff_caps<F: FnOnce(&mut B, &[QubitId])>(
     // If coeff is supplied, the same branch controls also transform that
     // external coefficient pair, but the ordinary qrisp sentinel state remains
     // available for clean branch-flag uncomputation.
-    kaliski_forward_with_coeff_caps(b, v_in, &st, p, iters, coeff, bulk_caps);
+    let lazy_frame = coeff.is_none() && kal_frame_enabled() && kal_frame_lazy_enabled();
+    if lazy_frame {
+        kaliski_frame::frame_forward_lazy(b, v_in, &mut st, p, iters);
+    } else {
+        kaliski_forward_with_coeff_caps(b, v_in, &st, p, iters, coeff, bulk_caps);
+    }
 
     if !keep_v {
         b.free_vec(&st.v_w);
@@ -9334,7 +9344,9 @@ fn with_kal_inv_raw_coeff_caps<F: FnOnce(&mut B, &[QubitId])>(
     // HMR/R in the reverse replay. This is heavier than the explicit backward,
     // but it keeps the specialized prefix and its matching global reverse in a
     // single contract. The hope is to eliminate the residual phase mismatch.
-    if std::env::var("KAL_BULK3_GENERALIZED_REVERSE").is_ok() {
+    if lazy_frame {
+        kaliski_frame::frame_backward_lazy(b, v_in, &mut st, p, iters);
+    } else if std::env::var("KAL_BULK3_GENERALIZED_REVERSE").is_ok() {
         emit_inverse_hmr_safe(b, |b| {
             kaliski_forward_with_coeff_caps(b, v_in, &st, p, iters, None, bulk_caps)
         });
