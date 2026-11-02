@@ -157,7 +157,7 @@ fn rotate_right_by(b: &mut B, v: &[QubitId], k: usize) {
 }
 
 /// v -= / += T where T = a (low k+10 bits) + m * 2^32, full 256-bit width.
-fn apply_t(b: &mut B, v: &[QubitId], a: &[QubitId], m: &[QubitId], sub: bool) {
+fn apply_t(b: &mut B, v: &[QubitId], a: &[QubitId], m: &[QubitId], sub: bool, lowq: bool) {
     let n = v.len();
     let k = m.len();
     let mut opnd: Vec<QubitId> = a.to_vec();
@@ -169,16 +169,27 @@ fn apply_t(b: &mut B, v: &[QubitId], a: &[QubitId], m: &[QubitId], sub: bool) {
     let top = b.alloc_qubits(n - 32 - k);
     opnd.extend_from_slice(&top);
     pads.extend_from_slice(&top);
-    if sub {
-        sub_nbit_qq_fast(b, &opnd, v);
-    } else {
-        add_nbit_qq_fast(b, &opnd, v);
+    match (sub, lowq) {
+        (true, false) => sub_nbit_qq_fast(b, &opnd, v),
+        (false, false) => add_nbit_qq_fast(b, &opnd, v),
+        (true, true) => sub_nbit_qq(b, &opnd, v),
+        (false, true) => add_nbit_qq(b, &opnd, v),
     }
     b.free_vec(&pads);
 }
 
 /// v := v * 2^-k mod p (secp256k1), 1 <= k <= 22.
 pub(super) fn mod_halve_by_k(b: &mut B, v: &[QubitId], k: usize) {
+    halve_by_k_impl(b, v, k, false)
+}
+
+/// Like `mod_halve_by_k` but the 256-bit subtraction uses the carry-free
+/// Cuccaro (no 255-qubit carry register) for peak-sensitive call sites.
+pub(super) fn mod_halve_by_k_lowq(b: &mut B, v: &[QubitId], k: usize) {
+    halve_by_k_impl(b, v, k, true)
+}
+
+fn halve_by_k_impl(b: &mut B, v: &[QubitId], k: usize, lowq: bool) {
     let n = v.len();
     assert_eq!(n, 256);
     assert!(k >= 1 && k <= 22);
@@ -187,7 +198,7 @@ pub(super) fn mod_halve_by_k(b: &mut B, v: &[QubitId], k: usize) {
     m_from_l(b, &v[0..k], &m, &digits, false);
     let a = b.alloc_qubits(k + 10);
     a_from_m(b, &m, &a, false);
-    apply_t(b, v, &a, &m, true);
+    apply_t(b, v, &a, &m, true, lowq);
     a_from_m(b, &m, &a, true);
     b.free_vec(&a);
     // Low k bits of v are now zero.
@@ -201,6 +212,14 @@ pub(super) fn mod_halve_by_k(b: &mut B, v: &[QubitId], k: usize) {
 /// v := v * 2^k mod p (secp256k1), 1 <= k <= 22. Exact reverse of
 /// `mod_halve_by_k`.
 pub(super) fn mod_double_by_k(b: &mut B, v: &[QubitId], k: usize) {
+    double_by_k_impl(b, v, k, false)
+}
+
+pub(super) fn mod_double_by_k_lowq(b: &mut B, v: &[QubitId], k: usize) {
+    double_by_k_impl(b, v, k, true)
+}
+
+fn double_by_k_impl(b: &mut B, v: &[QubitId], k: usize, lowq: bool) {
     let n = v.len();
     assert_eq!(n, 256);
     assert!(k >= 1 && k <= 22);
@@ -212,7 +231,7 @@ pub(super) fn mod_double_by_k(b: &mut B, v: &[QubitId], k: usize) {
     rotate_right_by(b, v, n - k);
     let a = b.alloc_qubits(k + 10);
     a_from_m(b, &m, &a, false);
-    apply_t(b, v, &a, &m, false);
+    apply_t(b, v, &a, &m, false, lowq);
     a_from_m(b, &m, &a, true);
     b.free_vec(&a);
     m_from_l(b, &v[0..k], &m, &digits, true);

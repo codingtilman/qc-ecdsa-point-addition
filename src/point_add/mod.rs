@@ -1948,24 +1948,16 @@ fn mod_mul_write_into_zero_acc_schoolbook_lowq(
     let hi: Vec<QubitId> = tmp_ext[n..2 * n].to_vec();
     mod_add_qq_fast_from_zero(b, acc, &lo, p);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..2 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 2);
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 22);
     mod_add_qq(b, acc, &hi, p);
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 22);
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 10);
 
     schoolbook_mul_into_addsub_lowq_inverse(b, x, y, &tmp_ext);
     b.free_vec(&tmp_ext);
@@ -1995,25 +1987,17 @@ fn mod_mul_write_into_zero_acc_schoolbook(
     let _ = c;
     // 977 = 2^10 - 2^6 + 2^4 + 2^0 consolidation. 5 ops instead of 7.
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..2 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 2);
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 22);
     mod_add_qq(b, acc, &hi, p);
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 22);
     b.set_phase("sol_halve_tail");
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 10);
 
     b.set_phase("schoolbook_mul_inverse");
     schoolbook_mul_into_addsub_inverse(b, x, y, &tmp_ext);
@@ -2734,24 +2718,16 @@ fn mod_mul_add_into_acc_karatsuba_lowq_with_tmp_ext(
     let hi: Vec<QubitId> = tmp_ext[n..2 * n].to_vec();
     mod_add_qq_fast(b, acc, &lo, p);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..2 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 2);
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 22);
     mod_add_qq(b, acc, &hi, p);
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 22);
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 10);
 
     karatsuba_inverse_lowq(b, x, y, tmp_ext, &z1_reg);
     b.free_vec(&z1_reg);
@@ -2845,24 +2821,16 @@ fn mod_mul_add_into_acc_karatsuba_with_tmp_ext(
     let hi: Vec<QubitId> = tmp_ext[n..2 * n].to_vec();
     mod_add_qq_fast(b, acc, &lo, p);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..2 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 2);
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 22);
     mod_add_qq(b, acc, &hi, p);
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 22);
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 10);
 
     karatsuba_inverse(b, x, y, tmp_ext, &z1_reg);
     b.free_vec(&z1_reg);
@@ -2903,33 +2871,25 @@ fn mod_mul_write_into_zero_acc_karatsuba_with_tmp_ext(
     mod_add_qq_fast_from_zero(b, acc, &lo, p);
     b.set_phase("sol_add0");
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     b.set_phase("sol_add4");
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..2 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 2);
     b.set_phase("sol_sub6");
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     b.set_phase("sol_add10");
     mod_add_qq_fast(b, acc, &hi, p);
     b.set_phase("kara_solinas_shift22L");
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 22);
     b.set_phase("kara_solinas_post32_add");
     // Use non-fast mod_add at peak site (after shift_left, with extra locals alive)
     // to save 256 carry qubits at the expense of ~n Toffoli.
     mod_add_qq(b, acc, &hi, p);
     b.set_phase("kara_solinas_shift22R");
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 22);
     b.set_phase("kara_solinas_post_halve");
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 10);
 
     b.set_phase("kara_inv");
     karatsuba_inverse(b, x, y, tmp_ext, &z1_reg);
@@ -3137,24 +3097,16 @@ fn mod_mul_write_into_zero_acc_karatsuba2(
     let hi: Vec<QubitId> = tmp_ext[n..2 * n].to_vec();
     mod_add_qq_fast_from_zero(b, acc, &lo, p);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..2 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 2);
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 22);
     mod_add_qq(b, acc, &hi, p);
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 22);
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 10);
 
     karatsuba_inverse_2level(b, x, y, &tmp_ext, &z1_reg, &z1_inner_a, &z1_inner_b);
     b.free_vec(&z1_inner_b);
@@ -3186,25 +3138,17 @@ fn mod_mul_add_into_acc_schoolbook(
     // Solinas with 977 = 2^10 - 2^6 + 2^4 + 2^0. c = 2^32 + 977 = {+2^0, +2^4, -2^6, +2^10, +2^32}.
     // 5 ops instead of 7 (saves 2 per call). Use shift_left_by_22 for the 10→32 gap.
     mod_add_qq_fast(b, acc, &hi, p); // position 0
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p); // position 4
-    for _ in 0..2 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 2);
     mod_sub_qq_fast(b, acc, &hi, p); // position 6 (SUB because of 977 consolidation)
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p); // position 10
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 22);
     mod_add_qq(b, acc, &hi, p); // position 32
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 22);
     b.set_phase("sol_halve_tail");
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 10);
 
     b.set_phase("schoolbook_mul_inverse");
     schoolbook_mul_into_addsub_inverse(b, x, y, &tmp_ext);
@@ -3293,24 +3237,16 @@ fn squaring_add_to_acc_schoolbook(b: &mut B, acc: &[QubitId], x: &[QubitId], p: 
     let hi: Vec<QubitId> = tmp_ext[n..2 * n].to_vec();
     mod_add_qq_fast(b, acc, &lo, p);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..2 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 2);
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 22);
     mod_add_qq(b, acc, &hi, p);
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 22);
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 10);
 
     schoolbook_square_symmetric_inverse(b, x, &tmp_ext);
     b.free_vec(&tmp_ext);
@@ -3324,24 +3260,16 @@ fn mod_add_solinas_ext_product(b: &mut B, acc: &[QubitId], tmp_ext: &[QubitId], 
     let hi: Vec<QubitId> = tmp_ext[n..2 * n].to_vec();
     mod_add_qq_fast(b, acc, &lo, p);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..2 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 2);
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_add_qq_fast(b, acc, &hi, p);
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 22);
     mod_add_qq(b, acc, &hi, p);
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 22);
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 10);
 }
 
 fn mod_sub_solinas_ext_product(b: &mut B, acc: &[QubitId], tmp_ext: &[QubitId], p: U256) {
@@ -3352,24 +3280,16 @@ fn mod_sub_solinas_ext_product(b: &mut B, acc: &[QubitId], tmp_ext: &[QubitId], 
     let hi: Vec<QubitId> = tmp_ext[n..2 * n].to_vec();
     mod_sub_qq_fast(b, acc, &lo, p);
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..2 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 2);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_sub_qq_fast(b, acc, &hi, p);
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 22);
     mod_sub_qq(b, acc, &hi, p);
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 22);
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 10);
 }
 
 fn square_tx_and_combined_ty_l2minus3qx(
@@ -3445,24 +3365,16 @@ fn squaring_sub_from_acc_schoolbook(b: &mut B, acc: &[QubitId], x: &[QubitId], p
     // 977 consolidation: c = {+2^0, +2^4, -2^6, +2^10, +2^32}. For acc-=hi·c, signs flip:
     // acc -= hi·2^0, acc -= hi·2^4, acc += hi·2^6, acc -= hi·2^10, acc -= hi·2^32.
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..2 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 2);
     mod_add_qq_fast(b, acc, &hi, p); // sign flipped
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_sub_qq_fast(b, acc, &hi, p);
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k(b, &hi, p, 22);
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 22);
     mod_sub_qq(b, acc, &hi, p);
-    mod_shift_right_by_k(b, &hi, p, 22, spill, flag_inv, ovf);
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 22);
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 10);
 
     // Phase 3: uncompute tmp_ext via symmetric schoolbook inverse.
     schoolbook_square_symmetric_inverse(b, x, &tmp_ext);
@@ -3489,24 +3401,16 @@ fn squaring_sub_from_acc_schoolbook_lowq_shift22(
     mod_sub_qq_fast(b, acc, &lo, p);
     let _ = c;
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_sub_qq_fast(b, acc, &hi, p);
-    for _ in 0..2 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 2);
     mod_add_qq_fast(b, acc, &hi, p);
-    for _ in 0..4 {
-        mod_double_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 4);
     mod_sub_qq_fast(b, acc, &hi, p);
-    let (spill, flag_inv, ovf) = mod_shift_left_by_k_lowq(b, &hi, p, 22);
+    solinas_shift::mod_double_by_k_lowq(b, &hi, 22);
     mod_sub_qq(b, acc, &hi, p);
-    mod_shift_right_by_k_lowq(b, &hi, p, 22, spill, flag_inv, ovf);
-    for _ in 0..10 {
-        mod_halve_inplace_fast(b, &hi, p);
-    }
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 22);
+    solinas_shift::mod_halve_by_k_lowq(b, &hi, 10);
 
     schoolbook_square_symmetric_inverse(b, x, &tmp_ext);
     b.free_vec(&tmp_ext);
