@@ -70,6 +70,7 @@ use crate::sim::Simulator;
 use crate::weierstrass_elliptic_curve::WeierstrassEllipticCurve;
 
 mod fermat_inv;
+mod kaliski_frame;
 mod solinas_shift;
 mod venting;
 
@@ -3930,6 +3931,11 @@ fn bulk_prefix_caps(pair: KalPair) -> BulkPrefixCaps {
     BulkPrefixCaps { forward, backward }
 }
 
+/// Lazy (u, v_w) frame Kaliski iterations (see kaliski_frame.rs).
+fn kal_frame_enabled() -> bool {
+    env_flag_enabled("KAL_FRAME", true)
+}
+
 fn bulk_prefix_enabled() -> bool {
     match std::env::var("KAL_BULK3_EXPERIMENT") {
         Ok(v) => v != "0",
@@ -6950,6 +6956,19 @@ fn kaliski_forward_with_coeff_caps(
 
     // ─── Iterations ───
     let use_bulk_prefix3 = bulk_prefix_enabled();
+    if coeff.is_none() && kal_frame_enabled() {
+        for i in 0..iters {
+            let f = if use_bulk_prefix3 && i < bulk_caps.forward {
+                None
+            } else {
+                Some(st.f_flag)
+            };
+            kaliski_frame::frame_iter_forward(
+                b, p, &st.u, &st.v_w, &st.r, &st.s, st.m_hist[i], f, i,
+            );
+        }
+        return;
+    }
     for i in 0..iters {
         if use_bulk_prefix3 && i < bulk_caps.forward {
             kaliski_iteration_bulk_prefix3(
@@ -7455,6 +7474,17 @@ fn kaliski_backward_caps(
     let use_bulk_prefix3 = bulk_prefix_enabled();
     // ─── Reverse iterations (in reverse order) ───
     for i in (0..iters).rev() {
+        if kal_frame_enabled() {
+            let f = if use_bulk_prefix3 && i < bulk_caps.backward {
+                None
+            } else {
+                Some(st.f_flag)
+            };
+            kaliski_frame::frame_iter_backward(
+                b, p, &st.u, &st.v_w, &st.r, &st.s, st.m_hist[i], f, i,
+            );
+            continue;
+        }
         if use_bulk_prefix3 && i < bulk_caps.backward {
             kaliski_iteration_bulk_prefix3_backward(
                 b,
