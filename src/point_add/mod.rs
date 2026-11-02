@@ -2501,6 +2501,32 @@ fn schoolbook_mul_into_addsub_inverse(
 //  1-level Karatsuba multiplication
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// In-place Karatsuba half sum: [hi, carry] += lo, so the (h+1)-bit sum lives
+/// in the operand's own high half plus one carry qubit instead of a fresh
+/// (h+1)-qubit register. Restored by `kara_inplace_unsum`.
+fn kara_inplace_sum_ok(x: &[QubitId], y: &[QubitId]) -> bool {
+    env_flag_enabled("KARA_INPLACE_SUM", true) && x.iter().all(|q| !y.contains(q))
+}
+fn kara_inplace_sum(b: &mut B, lo: &[QubitId], hi: &[QubitId]) -> (Vec<QubitId>, QubitId) {
+    let carry = b.alloc_qubit();
+    let mut sum = hi.to_vec();
+    sum.push(carry);
+    let pad = b.alloc_qubit();
+    let mut lo_ext = lo.to_vec();
+    lo_ext.push(pad);
+    add_nbit_qq_fast(b, &lo_ext, &sum);
+    b.free(pad);
+    (sum, carry)
+}
+fn kara_inplace_unsum(b: &mut B, lo: &[QubitId], sum: &[QubitId], carry: QubitId) {
+    let pad = b.alloc_qubit();
+    let mut lo_ext = lo.to_vec();
+    lo_ext.push(pad);
+    sub_nbit_qq_fast(b, &lo_ext, sum);
+    b.free(pad);
+    b.free(carry);
+}
+
 fn karatsuba_half_sum_compute(b: &mut B, lo: &[QubitId], hi: &[QubitId], acc: &[QubitId]) {
     let h = lo.len();
     debug_assert_eq!(h, hi.len());
@@ -2578,6 +2604,13 @@ fn karatsuba_forward(
         schoolbook_mul_into_addsub(b, &x_hi, &y_hi, &slice);
     }
 
+    if kara_inplace_sum_ok(x, y) {
+        let (xs, xa) = kara_inplace_sum(b, &x_lo, &x_hi);
+        let (ys, ya) = kara_inplace_sum(b, &y_lo, &y_hi);
+        schoolbook_mul_into_addsub(b, &xs, &ys, z1_reg);
+        kara_inplace_unsum(b, &y_lo, &ys, ya);
+        kara_inplace_unsum(b, &x_lo, &xs, xa);
+    } else {
     let x_sum = b.alloc_qubits(h + 1);
     let y_sum = b.alloc_qubits(h + 1);
     karatsuba_half_sum_compute(b, &x_lo, &x_hi, &x_sum);
@@ -2588,6 +2621,7 @@ fn karatsuba_forward(
     karatsuba_half_sum_uncompute(b, &x_lo, &x_hi, &x_sum);
     b.free_vec(&y_sum);
     b.free_vec(&x_sum);
+    }
 
     {
         let pad = b.alloc_qubits(2);
@@ -2824,6 +2858,13 @@ fn karatsuba_inverse(
         b.free_vec(&pad);
     }
 
+    if kara_inplace_sum_ok(x, y) {
+        let (xs, xa) = kara_inplace_sum(b, &x_lo, &x_hi);
+        let (ys, ya) = kara_inplace_sum(b, &y_lo, &y_hi);
+        schoolbook_mul_into_addsub_inverse(b, &xs, &ys, z1_reg);
+        kara_inplace_unsum(b, &y_lo, &ys, ya);
+        kara_inplace_unsum(b, &x_lo, &xs, xa);
+    } else {
     let x_sum = b.alloc_qubits(h + 1);
     let y_sum = b.alloc_qubits(h + 1);
     karatsuba_half_sum_compute(b, &x_lo, &x_hi, &x_sum);
@@ -2833,6 +2874,7 @@ fn karatsuba_inverse(
     karatsuba_half_sum_uncompute(b, &x_lo, &x_hi, &x_sum);
     b.free_vec(&y_sum);
     b.free_vec(&x_sum);
+    }
 
     {
         let slice: Vec<QubitId> = tmp_ext[2 * h..4 * h].to_vec();
