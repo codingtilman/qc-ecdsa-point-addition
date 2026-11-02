@@ -136,7 +136,7 @@ fn gcd(a: usize, b: usize) -> usize {
 }
 
 /// new v[i] = old v[(i + k) mod n], using swaps along permutation cycles.
-fn rotate_right_by(b: &mut B, v: &[QubitId], k: usize) {
+pub(super) fn rotate_right_by(b: &mut B, v: &[QubitId], k: usize) {
     let n = v.len();
     let k = k % n;
     if k == 0 {

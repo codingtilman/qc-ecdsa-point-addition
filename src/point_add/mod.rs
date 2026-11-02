@@ -72,6 +72,7 @@ use crate::weierstrass_elliptic_curve::WeierstrassEllipticCurve;
 mod fermat_inv;
 mod kaliski_frame;
 mod solinas_shift;
+mod sparse_const;
 mod square_as;
 mod venting;
 
@@ -810,6 +811,10 @@ fn mod_neg_inplace_fast(b: &mut B, v: &[QubitId], p: U256) {
         b.x(q);
     }
     let n = v.len();
+    if sparse_const_enabled() {
+        sparse_const::add_const(b, v, p.wrapping_add(U256::from(1)), None, false);
+        return;
+    }
     let ca = load_const(b, n, p.wrapping_add(U256::from(1)));
     add_nbit_qq_fast(b, &ca, v);
     unload_const(b, &ca, p.wrapping_add(U256::from(1)));
@@ -1025,7 +1030,14 @@ fn cadd_nbit_const(b: &mut B, acc: &[QubitId], c: U256, ctrl: QubitId) {
     b.free_vec(&a);
 }
 
+fn sparse_const_enabled() -> bool {
+    env_flag_enabled("SPARSE_CONST", true)
+}
 fn csub_nbit_const_fast(b: &mut B, acc: &[QubitId], c: U256, ctrl: QubitId) {
+    if sparse_const_enabled() {
+        sparse_const::add_const(b, acc, c, Some(ctrl), true);
+        return;
+    }
     let n = acc.len();
     let a = b.alloc_qubits(n);
     for i in 0..n {
@@ -1117,6 +1129,10 @@ fn csub_nbit_const_direct_fast(b: &mut B, acc: &[QubitId], c: U256, ctrl: QubitI
 }
 
 fn cadd_nbit_const_fast(b: &mut B, acc: &[QubitId], c: U256, ctrl: QubitId) {
+    if sparse_const_enabled() {
+        sparse_const::add_const(b, acc, c, Some(ctrl), false);
+        return;
+    }
     let n = acc.len();
     let a = b.alloc_qubits(n);
     for i in 0..n {
@@ -1204,6 +1220,10 @@ fn cadd_nbit_const_direct_fast(b: &mut B, acc: &[QubitId], c: U256, ctrl: QubitI
 }
 
 fn add_nbit_const_fast(b: &mut B, acc: &[QubitId], c: U256) {
+    if sparse_const_enabled() {
+        sparse_const::add_const(b, acc, c, None, false);
+        return;
+    }
     let n = acc.len();
     let a = load_const(b, n, c);
     add_nbit_qq_fast(b, &a, acc);
@@ -1211,6 +1231,10 @@ fn add_nbit_const_fast(b: &mut B, acc: &[QubitId], c: U256) {
 }
 
 fn sub_nbit_const_fast(b: &mut B, acc: &[QubitId], c: U256) {
+    if sparse_const_enabled() {
+        sparse_const::add_const(b, acc, c, None, true);
+        return;
+    }
     let n = acc.len();
     let a = load_const(b, n, c);
     sub_nbit_qq_fast(b, &a, acc);
@@ -1788,6 +1812,8 @@ fn mod_add_qq_fast(b: &mut B, acc: &[QubitId], a: &[QubitId], p: U256) {
         );
         b.free(q_clean2[0]);
         b.free(q_clean2[1]);
+    } else if sparse_const_enabled() {
+        sparse_const::add_const(b, &acc_ext, c, None, false);
     } else {
         let n1 = acc_ext.len();
         let ca = load_const(b, n1, c);
@@ -1812,6 +1838,8 @@ fn mod_add_qq_fast(b: &mut B, acc: &[QubitId], a: &[QubitId], p: U256) {
         );
         b.free(q_clean2[0]);
         b.free(q_clean2[1]);
+    } else if sparse_const_enabled() {
+        sparse_const::add_const(b, &acc_ext, c, Some(flag), true);
     } else {
         let n1 = acc_ext.len();
         let ca = b.alloc_qubits(n1);
@@ -1871,6 +1899,8 @@ fn mod_add_qq_fast_from_zero(b: &mut B, acc: &[QubitId], a: &[QubitId], p: U256)
         );
         b.free(q_clean2[0]);
         b.free(q_clean2[1]);
+    } else if sparse_const_enabled() {
+        sparse_const::add_const(b, &acc_ext, c, None, false);
     } else {
         let n1 = acc_ext.len();
         let ca = load_const(b, n1, c);
@@ -1894,6 +1924,8 @@ fn mod_add_qq_fast_from_zero(b: &mut B, acc: &[QubitId], a: &[QubitId], p: U256)
         );
         b.free(q_clean2[0]);
         b.free(q_clean2[1]);
+    } else if sparse_const_enabled() {
+        sparse_const::add_const(b, &acc_ext, c, Some(flag), true);
     } else {
         let n1 = acc_ext.len();
         let ca = b.alloc_qubits(n1);
@@ -2577,7 +2609,11 @@ fn karatsuba_forward(
         z1_ext.extend_from_slice(&pad);
         let acc_slice: Vec<QubitId> = tmp_ext[h..4 * h].to_vec();
         b.set_phase("kara_z1_add");
-        add_nbit_qq_fast(b, &z1_ext, &acc_slice);
+        if sparse_const_enabled() {
+            add_nbit_qq(b, &z1_ext, &acc_slice);
+        } else {
+            add_nbit_qq_fast(b, &z1_ext, &acc_slice);
+        }
         b.free_vec(&pad);
     }
 }
@@ -2766,7 +2802,11 @@ fn karatsuba_inverse(
         let mut z1_ext: Vec<QubitId> = z1_reg.to_vec();
         z1_ext.extend_from_slice(&pad);
         let acc_slice: Vec<QubitId> = tmp_ext[h..4 * h].to_vec();
-        sub_nbit_qq_fast(b, &z1_ext, &acc_slice);
+        if sparse_const_enabled() {
+            sub_nbit_qq(b, &z1_ext, &acc_slice);
+        } else {
+            sub_nbit_qq_fast(b, &z1_ext, &acc_slice);
+        }
         b.free_vec(&pad);
     }
     {
@@ -3040,7 +3080,11 @@ fn karatsuba_inverse_2level(
         let mut z1_ext: Vec<QubitId> = z1_reg.to_vec();
         z1_ext.extend_from_slice(&pad);
         let acc_slice: Vec<QubitId> = tmp_ext[h..4 * h].to_vec();
-        sub_nbit_qq_fast(b, &z1_ext, &acc_slice);
+        if sparse_const_enabled() {
+            sub_nbit_qq(b, &z1_ext, &acc_slice);
+        } else {
+            sub_nbit_qq_fast(b, &z1_ext, &acc_slice);
+        }
         b.free_vec(&pad);
     }
     {

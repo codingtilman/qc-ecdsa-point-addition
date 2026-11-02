@@ -90,6 +90,93 @@ fn e_identity(b: &mut B, r0: QubitId, sig: QubitId, add_f: QubitId, e: QubitId) 
     b.free(g);
 }
 
+
+/// acc += (cond ? -opnd : +opnd) mod 2^len, cond = (ctrl == neg_when_ctrl).
+/// Uses v - a = ~(~v + a); opnd must already match acc's width.
+fn pm_add(b: &mut B, acc: &[QubitId], opnd: &[QubitId], ctrl: QubitId, neg_when_ctrl: bool) {
+    if !neg_when_ctrl {
+        b.x(ctrl);
+    }
+    for &q in acc {
+        b.cx(ctrl, q);
+    }
+    add_nbit_qq_fast(b, opnd, acc);
+    for &q in acc {
+        b.cx(ctrl, q);
+    }
+    if !neg_when_ctrl {
+        b.x(ctrl);
+    }
+}
+
+fn rot_left1(b: &mut B, v: &[QubitId]) {
+    solinas_shift::rotate_right_by(b, v, v.len() - 1);
+}
+fn rot_right1(b: &mut B, v: &[QubitId]) {
+    solinas_shift::rotate_right_by(b, v, 1);
+}
+
+/// tmp-free STEP 4: Y -= add*X (width w), S += add*R.
+///   Y: 2Y - X, then -/+X  -> 2(Y - add*X), halve.
+///   S: 2S + R, then +/-R  -> 2(S + add*R), halve.
+/// Exact in (w+2)/(ws+1)-bit windows; no field-wide tmp register.
+fn step4_nt(b: &mut B, u: &[QubitId], v_w: &[QubitId], r: &[QubitId], s: &[QubitId], add_f: QubitId, iter_idx: usize, inverse: bool) {
+    let n = u.len();
+    let w = if iter_idx < n { n } else { 2 * n - iter_idx };
+    let tw = if iter_idx + 1 < n { iter_idx + 1 } else { n };
+    let ws = if iter_idx + 2 < n { iter_idx + 2 } else { n };
+
+    let y_part = |b: &mut B| {
+        let ext = b.alloc_qubits(2);
+        let mut yx: Vec<QubitId> = v_w[0..w].to_vec();
+        yx.extend_from_slice(&ext);
+        let pads = b.alloc_qubits(2);
+        let mut xp: Vec<QubitId> = u[0..w].to_vec();
+        xp.extend_from_slice(&pads);
+        rot_left1(b, &yx);
+        if !inverse {
+            sub_nbit_qq_fast(b, &xp, &yx);
+            pm_add(b, &yx, &xp, add_f, true);
+        } else {
+            pm_add(b, &yx, &xp, add_f, false);
+            add_nbit_qq_fast(b, &xp, &yx);
+        }
+        rot_right1(b, &yx);
+        b.free_vec(&pads);
+        b.free_vec(&ext);
+    };
+    let s_part = |b: &mut B| {
+        let ext = b.alloc_qubit();
+        let mut sx: Vec<QubitId> = s[0..ws].to_vec();
+        sx.push(ext);
+        let pads = b.alloc_qubits(ws + 1 - tw);
+        let mut rp: Vec<QubitId> = r[0..tw].to_vec();
+        rp.extend_from_slice(&pads);
+        rot_left1(b, &sx);
+        if !inverse {
+            add_nbit_qq_fast(b, &rp, &sx);
+            pm_add(b, &sx, &rp, add_f, false);
+        } else {
+            pm_add(b, &sx, &rp, add_f, true);
+            sub_nbit_qq_fast(b, &rp, &sx);
+        }
+        rot_right1(b, &sx);
+        b.free_vec(&pads);
+        b.free(ext);
+    };
+    if !inverse {
+        y_part(b);
+        s_part(b);
+    } else {
+        s_part(b);
+        y_part(b);
+    }
+}
+
+fn step4_tmp_free() -> bool {
+    env_flag_enabled("KAL_STEP4_TMP_FREE", true)
+}
+
 fn step4_forward(b: &mut B, u: &[QubitId], v_w: &[QubitId], r: &[QubitId], s: &[QubitId], add_f: QubitId, iter_idx: usize) {
     let n = u.len();
     let tmp = b.alloc_qubits(n);
@@ -262,7 +349,11 @@ pub(super) fn frame_iter_forward(
     b.cx(e, sig);
 
     b.set_phase(if bulk { "kal_bulk_step4" } else { "kal_step4" });
-    step4_forward(b, u, v_w, r, s, add_f, iter_idx);
+    if step4_tmp_free() {
+        step4_nt(b, u, v_w, r, s, add_f, iter_idx, false);
+    } else {
+        step4_forward(b, u, v_w, r, s, add_f, iter_idx);
+    }
 
     b.set_phase(if bulk { "kal_bulk_step5" } else { "kal_step5" });
     e_identity(b, r[0], sig, add_f, e);
@@ -332,7 +423,11 @@ pub(super) fn frame_iter_backward(
     e_identity(b, r[0], sig, add_f, e);
 
     b.set_phase(if bulk { "bk_bulk_step4" } else { "bk_step4" });
-    step4_backward(b, u, v_w, r, s, add_f, iter_idx);
+    if step4_tmp_free() {
+        step4_nt(b, u, v_w, r, s, add_f, iter_idx, true);
+    } else {
+        step4_backward(b, u, v_w, r, s, add_f, iter_idx);
+    }
 
     b.set_phase(if bulk { "bk_bulk_step3_cswap" } else { "bk_step3_cswap" });
     b.cx(e, sig);
