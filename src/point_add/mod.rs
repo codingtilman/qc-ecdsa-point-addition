@@ -6957,6 +6957,7 @@ fn kaliski_forward_with_coeff_caps(
     // ─── Iterations ───
     let use_bulk_prefix3 = bulk_prefix_enabled();
     if coeff.is_none() && kal_frame_enabled() {
+        let sig = b.alloc_qubit();
         for i in 0..iters {
             let f = if use_bulk_prefix3 && i < bulk_caps.forward {
                 None
@@ -6964,9 +6965,11 @@ fn kaliski_forward_with_coeff_caps(
                 Some(st.f_flag)
             };
             kaliski_frame::frame_iter_forward(
-                b, p, &st.u, &st.v_w, &st.r, &st.s, st.m_hist[i], f, i,
+                b, p, &st.u, &st.v_w, &st.r, &st.s, st.m_hist[i], f, sig, i,
             );
         }
+        // Terminated runs end in the aligned frame (sig = 0).
+        b.free(sig);
         return;
     }
     for i in 0..iters {
@@ -7472,16 +7475,17 @@ fn kaliski_backward_caps(
     debug_assert!(iters <= st.m_hist.len());
 
     let use_bulk_prefix3 = bulk_prefix_enabled();
+    let frame_sig = if kal_frame_enabled() { Some(b.alloc_qubit()) } else { None };
     // ─── Reverse iterations (in reverse order) ───
     for i in (0..iters).rev() {
-        if kal_frame_enabled() {
+        if let Some(sig) = frame_sig {
             let f = if use_bulk_prefix3 && i < bulk_caps.backward {
                 None
             } else {
                 Some(st.f_flag)
             };
             kaliski_frame::frame_iter_backward(
-                b, p, &st.u, &st.v_w, &st.r, &st.s, st.m_hist[i], f, i,
+                b, p, &st.u, &st.v_w, &st.r, &st.s, st.m_hist[i], f, sig, i,
             );
             continue;
         }
@@ -7511,6 +7515,9 @@ fn kaliski_backward_caps(
         }
     }
 
+    if let Some(sig) = frame_sig {
+        b.free(sig);
+    }
     // ─── Reverse Init ───
     b.x(st.f_flag);
     b.x(st.s[0]);

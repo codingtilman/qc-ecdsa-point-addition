@@ -1,24 +1,25 @@
-//! Lazy-frame Kaliski iteration: drops the STEP-9 (u, v_w) swap-back.
+//! Lazy-frame Kaliski iteration: drops the STEP-9 swap-back of both
+//! (u, v_w) and (r, s). A persistent `sig` qubit (zero at Kaliski start and,
+//! once terminated, at the end) holds the current frame = original `a`; both
+//! pairs are swapped by the relative swap `e` each iteration. The identity
+//! below only uses true-frame invariants, so it holds in any representation.
 //!
 //! The original iteration swaps (u, v_w) and (r, s) by `a` (= "u is the
-//! target"), updates, then swaps both pairs back. Here the (u, v_w) registers
-//! are left in the post-swap frame: register X (`u`) always holds the
-//! non-target and Y (`v_w`) the halved target. The Kaliski selection rule is
-//! symmetric under (u,r) <-> (v,s), so the next iteration can run on (X, Y)
-//! directly; only the relative swap `e` = "X is target" is needed. The true
-//! frame sigma (= previous `a`) is always recoverable as `!s[0]` because (r, s)
-//! are still swapped back (qrisp invariant a == !s[0]).
+//! target"), updates, then swaps both pairs back. Here both pairs stay in the
+//! post-swap frame: X (`u`) holds the non-target, Y (`v_w`) the halved
+//! target, and (r, s) the post-swap coefficients. The Kaliski selection rule
+//! is symmetric under (u,r) <-> (v,s), so the next iteration only needs the
+//! relative swap `e` = "X is target".
 //!
-//! Per iteration:
-//!   sigma  = !s[0]
+//! Per iteration (sig = current frame = previous true `a`):
 //!   add    = f & X0 & Y0
 //!   e      = (f & !X0) ^ (add & cmp),   cmp = X > Y, ties (X == Y == 1)
-//!            broken by sigma (comparator carry-in) so the true v is chosen.
-//!   cswap(e: X, Y); sigma ^= e (= true a); cswap(sigma: r, s)
+//!            broken by sig (comparator carry-in) so the true v is chosen.
+//!   cswap(e: X,Y); cswap(e: r,s); sig ^= e (= true a)
 //!   STEP 4 (Y -= add*X; s' += add*r')
-//!   e ^= r'[0] & (sigma | add)        (exact identity, see below)
+//!   e ^= r'[0] & (sig | add)        (exact identity, see below)
 //!   m_i ^= add; add ^= f & m_i (measured)
-//!   STEP 6-8 (halve Y, double r'); cswap(sigma: r, s); sigma ^= !s[0]
+//!   STEP 6-8 (halve Y, double r')
 //!
 //! Identity for e: if sigma=1, r' = s_old so e = !sigma_old = s_old[0] = r'[0].
 //! If sigma=0, s_old[0] = s_new[0] ^ (add & r[0]) = 1 ^ (add & r[0]), so
@@ -78,12 +79,6 @@ fn with_gt_cin<F: FnOnce(&mut B)>(
         b.x(u[i]);
     }
     b.free_vec(&carries);
-}
-
-fn sigma_from_s0(b: &mut B, s: &[QubitId], sig: QubitId) {
-    b.x(s[0]);
-    b.cx(s[0], sig);
-    b.x(s[0]);
 }
 
 /// e ^= r[0] & (sig | add)
@@ -207,12 +202,12 @@ pub(super) fn frame_iter_forward(
     s: &[QubitId],
     m_i: QubitId,
     f: Option<QubitId>,
+    sig: QubitId,
     iter_idx: usize,
 ) {
     let n = u.len();
     let w_uv = if iter_idx < n { n } else { 2 * n - iter_idx };
     let w_rs3 = if iter_idx + 1 < n { iter_idx + 1 } else { n };
-    let w_rs9 = if iter_idx + 2 < n { iter_idx + 2 } else { n };
     let bulk = f.is_none();
     let saved = b.phase;
 
@@ -225,8 +220,6 @@ pub(super) fn frame_iter_forward(
     }
 
     b.set_phase(if bulk { "kal_bulk_step1" } else { "kal_step1" });
-    let sig = b.alloc_qubit();
-    sigma_from_s0(b, s, sig);
     {
         let z = b.alloc_qubit();
         match f {
@@ -263,10 +256,10 @@ pub(super) fn frame_iter_forward(
     for j in 0..w_uv {
         cswap(b, e, u[j], v_w[j]);
     }
-    b.cx(e, sig);
     for j in 0..w_rs3 {
-        cswap(b, sig, r[j], s[j]);
+        cswap(b, e, r[j], s[j]);
     }
+    b.cx(e, sig);
 
     b.set_phase(if bulk { "kal_bulk_step4" } else { "kal_step4" });
     step4_forward(b, u, v_w, r, s, add_f, iter_idx);
@@ -293,13 +286,6 @@ pub(super) fn frame_iter_forward(
         mod_double_inplace_fast(b, r, p);
     }
 
-    b.set_phase(if bulk { "kal_bulk_step9_cswap" } else { "kal_step9_cswap" });
-    for j in 0..w_rs9 {
-        cswap(b, sig, r[j], s[j]);
-    }
-    sigma_from_s0(b, s, sig);
-
-    b.free(sig);
     b.free(add_f);
     b.free(e);
     b.set_phase(saved);
@@ -315,24 +301,17 @@ pub(super) fn frame_iter_backward(
     s: &[QubitId],
     m_i: QubitId,
     f: Option<QubitId>,
+    sig: QubitId,
     iter_idx: usize,
 ) {
     let n = u.len();
     let w_uv = if iter_idx < n { n } else { 2 * n - iter_idx };
     let w_rs3 = if iter_idx + 1 < n { iter_idx + 1 } else { n };
-    let w_rs9 = if iter_idx + 2 < n { iter_idx + 2 } else { n };
     let bulk = f.is_none();
     let saved = b.phase;
 
     let e = b.alloc_qubit();
     let add_f = b.alloc_qubit();
-    let sig = b.alloc_qubit();
-
-    b.set_phase(if bulk { "bk_bulk_step9_cswap" } else { "bk_step9_cswap" });
-    sigma_from_s0(b, s, sig);
-    for j in (0..w_rs9).rev() {
-        cswap(b, sig, r[j], s[j]);
-    }
 
     b.set_phase(if bulk { "bk_bulk_step6_7_8" } else { "bk_step6_7_8" });
     if iter_idx < r_small_threshold() {
@@ -356,10 +335,10 @@ pub(super) fn frame_iter_backward(
     step4_backward(b, u, v_w, r, s, add_f, iter_idx);
 
     b.set_phase(if bulk { "bk_bulk_step3_cswap" } else { "bk_step3_cswap" });
-    for j in (0..w_rs3).rev() {
-        cswap(b, sig, r[j], s[j]);
-    }
     b.cx(e, sig);
+    for j in (0..w_rs3).rev() {
+        cswap(b, e, r[j], s[j]);
+    }
     for j in (0..w_uv).rev() {
         cswap(b, e, u[j], v_w[j]);
     }
@@ -396,9 +375,6 @@ pub(super) fn frame_iter_backward(
         }
         b.free(z);
     }
-    sigma_from_s0(b, s, sig);
-    b.free(sig);
-
     if let Some(f) = f {
         b.set_phase("bk_step0_eqzero");
         step0_backward(b, v_w, m_i, f, add_f, iter_idx);
