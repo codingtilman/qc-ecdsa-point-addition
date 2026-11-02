@@ -70,6 +70,7 @@ use crate::sim::Simulator;
 use crate::weierstrass_elliptic_curve::WeierstrassEllipticCurve;
 
 mod fermat_inv;
+mod solinas_shift;
 mod venting;
 
 struct B {
@@ -9740,9 +9741,7 @@ fn build_standard_point_add(
             b.set_phase("pair1_mul1");
             pair1_mul1_write_into_zero_acc(b, &lam_inner, &ty, inv_raw, p);
             b.set_phase("pair1_halve");
-            for _ in 0..pair1_iters {
-                mod_halve_inplace_fast(b, &lam_inner, p);
-            }
+            solinas_shift::mod_halve_many(b, &lam_inner, pair1_iters);
             if affine_combined_y {
                 b.set_phase("pair1_mul2_deferred_combined_y");
             } else {
@@ -9864,9 +9863,7 @@ fn build_standard_point_add(
             } else {
                 with_kal_inv_raw_pair(b, &tx, p, pair2_iters, KalPair::Pair2, |b, inv_raw| {
                     b.set_phase("pair2_double");
-                    for _ in 0..pair2_iters {
-                        mod_double_inplace_fast(b, &lam, p);
-                    }
+                    solinas_shift::mod_double_many(b, &lam, pair2_iters);
                     b.set_phase("pair2_mul");
                     pair2_mul_add_into_acc(b, &lam, inv_raw, &ty, p);
                     b.set_phase("pair2_cleanup");
