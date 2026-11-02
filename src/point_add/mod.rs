@@ -72,6 +72,7 @@ use crate::weierstrass_elliptic_curve::WeierstrassEllipticCurve;
 mod fermat_inv;
 mod kaliski_frame;
 mod solinas_shift;
+mod square_as;
 mod venting;
 
 struct B {
@@ -3163,6 +3164,10 @@ fn mod_mul_add_into_acc_schoolbook(
 /// Row i layout (width n-i): bit 0 = diagonal x[i] at position 2i, bit 1 = 0
 /// (gap), bit k+2 = cross-product (x[i] AND x[i+1+k]) at position i+(i+1+k)+1.
 fn schoolbook_square_symmetric(b: &mut B, x: &[QubitId], tmp_ext: &[QubitId]) {
+    if env_flag_enabled("SQUARE_ADDSUB", true) {
+        square_as::square_into_zero(b, x, tmp_ext);
+        return;
+    }
     let n = x.len();
     debug_assert_eq!(tmp_ext.len(), 2 * n);
     for i in 0..n {
@@ -3196,6 +3201,10 @@ fn schoolbook_square_symmetric(b: &mut B, x: &[QubitId], tmp_ext: &[QubitId]) {
 }
 
 fn schoolbook_square_symmetric_inverse(b: &mut B, x: &[QubitId], tmp_ext: &[QubitId]) {
+    if env_flag_enabled("SQUARE_ADDSUB", true) {
+        square_as::square_into_zero_inverse(b, x, tmp_ext);
+        return;
+    }
     let n = x.len();
     for i in (0..n).rev() {
         let width = if i == n - 1 { 1 } else { n - i + 1 };
