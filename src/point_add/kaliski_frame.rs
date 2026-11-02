@@ -122,7 +122,7 @@ fn rot_right1(b: &mut B, v: &[QubitId]) {
 /// Exact in (w+2)/(ws+1)-bit windows; no field-wide tmp register.
 fn step4_nt(b: &mut B, u: &[QubitId], v_w: &[QubitId], r: &[QubitId], s: &[QubitId], add_f: QubitId, iter_idx: usize, inverse: bool) {
     let n = N;
-    let w = if iter_idx < n { n } else { 2 * n - iter_idx };
+    let w = uv_need(iter_idx);
     let tw = if iter_idx + 1 < n { iter_idx + 1 } else { n };
     let ws = if iter_idx + 2 < n { iter_idx + 2 } else { n };
 
@@ -287,13 +287,13 @@ pub(super) fn frame_iter_forward(
     v_w: &[QubitId],
     r: &[QubitId],
     s: &[QubitId],
-    m_i: QubitId,
+    m_slot: Option<QubitId>,
     f: Option<QubitId>,
     sig: QubitId,
     iter_idx: usize,
-) {
+) -> QubitId {
     let n = N;
-    let w_uv = if iter_idx < n { n } else { 2 * n - iter_idx };
+    let w_uv = uv_need(iter_idx);
     let w_rs3 = if iter_idx + 1 < n { iter_idx + 1 } else { n };
     let bulk = f.is_none();
     let saved = b.phase;
@@ -302,6 +302,7 @@ pub(super) fn frame_iter_forward(
     let add_f = b.alloc_qubit();
 
     if let Some(f) = f {
+        let m_i = m_slot.expect("generic iteration needs its history qubit up front");
         b.set_phase("kal_step0_eqzero");
         step0_forward(b, v_w, m_i, f, add_f, iter_idx);
     }
@@ -357,6 +358,12 @@ pub(super) fn frame_iter_forward(
 
     b.set_phase(if bulk { "kal_bulk_step5" } else { "kal_step5" });
     e_identity(b, r[0], sig, add_f, e);
+    // History bit is first written here; allocate it late to keep it out of
+    // the STEP-4 peak.
+    let m_i = match m_slot {
+        Some(q) => q,
+        None => b.alloc_qubit(),
+    };
     b.cx(add_f, m_i);
     match f {
         Some(f) => {
@@ -380,9 +387,11 @@ pub(super) fn frame_iter_forward(
     b.free(add_f);
     b.free(e);
     b.set_phase(saved);
+    m_i
 }
 
-/// Exact reverse of `frame_iter_forward`.
+/// Exact reverse of `frame_iter_forward`. With `free_m`, the history qubit is
+/// released as soon as it is cleared (before reverse STEP 4).
 pub(super) fn frame_iter_backward(
     b: &mut B,
     p: U256,
@@ -394,9 +403,10 @@ pub(super) fn frame_iter_backward(
     f: Option<QubitId>,
     sig: QubitId,
     iter_idx: usize,
+    free_m: bool,
 ) {
     let n = N;
-    let w_uv = if iter_idx < n { n } else { 2 * n - iter_idx };
+    let w_uv = uv_need(iter_idx);
     let w_rs3 = if iter_idx + 1 < n { iter_idx + 1 } else { n };
     let bulk = f.is_none();
     let saved = b.phase;
@@ -420,6 +430,9 @@ pub(super) fn frame_iter_backward(
         None => b.cx(m_i, add_f),
     }
     b.cx(add_f, m_i);
+    if free_m {
+        b.free(m_i);
+    }
     e_identity(b, r[0], sig, add_f, e);
 
     b.set_phase(if bulk { "bk_bulk_step4" } else { "bk_step4" });
@@ -483,11 +496,9 @@ pub(super) fn frame_iter_backward(
 /// Live (u, v_w) width at the start of iteration i: bitlen(u)+bitlen(v_w) <=
 /// 2n - i, so bits >= 2n - i of both are zero.
 fn uv_need(i: usize) -> usize {
-    if i < N {
-        N
-    } else {
-        2 * N - i
-    }
+    // bitlen(u) + bitlen(v_w) <= 2n - i and the other register is >= 1
+    // (pre-termination both are; afterwards X = 1), so each fits 2n - i - 1.
+    (2 * N - i - 1).min(N)
 }
 
 /// Forward Kaliski driver for the lazy-frame iteration with
@@ -523,9 +534,8 @@ pub(super) fn frame_forward_lazy(b: &mut B, v_in: &[QubitId], st: &mut KaliskiSt
             b.free(st.u[live]);
             b.free(st.v_w[live]);
         }
-        let m = b.alloc_qubit();
+        let m = frame_iter_forward(b, p, &st.u[..live], &st.v_w[..live], &st.r, &st.s, None, None, sig, i);
         st.m_hist.push(m);
-        frame_iter_forward(b, p, &st.u[..live], &st.v_w[..live], &st.r, &st.s, m, None, sig, i);
     }
     b.free(sig);
     st.u.truncate(live);
@@ -557,8 +567,7 @@ pub(super) fn frame_backward_lazy(b: &mut B, v_in: &[QubitId], st: &mut KaliskiS
             live += 1;
         }
         let m = st.m_hist.pop().expect("history");
-        frame_iter_backward(b, p, &st.u[..live], &st.v_w[..live], &st.r, &st.s, m, None, sig, i);
-        b.free(m);
+        frame_iter_backward(b, p, &st.u[..live], &st.v_w[..live], &st.r, &st.s, m, None, sig, i, true);
     }
     b.free(sig);
     b.x(st.s[0]);

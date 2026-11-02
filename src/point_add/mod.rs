@@ -3891,7 +3891,12 @@ fn mulmod(a: U256, b: U256, p: U256) -> U256 {
 /// (since max(r,s) doubles per iter starting from max=1, so max ≤ 2^iter_idx).
 /// In that range, mod_double(r)'s Solinas cadd is identity — replace with
 /// a plain shift (0 Toffoli) for ~255 CCX savings per iter.
-const R_SMALL_THRESHOLD: usize = 262;
+// Below this iteration index r is doubled without the mod-p correction. Before
+// termination the Kaliski invariant u*s + v*r = p (v >= 1) gives 2r' < p, so
+// the correction can only fire at or after the terminating step. Termination
+// for uniform inputs: mean 361.8, sd 9.5, min 318 over 2e5 samples, so 300 is
+// ~6 sd below the mean (much tighter than the 400/404 iteration caps).
+const R_SMALL_THRESHOLD: usize = 300;
 
 fn r_small_threshold() -> usize {
     std::env::var("KAL_R_SMALL_THRESHOLD")
@@ -7065,7 +7070,7 @@ fn kaliski_forward_with_coeff_caps(
                 Some(st.f_flag)
             };
             kaliski_frame::frame_iter_forward(
-                b, p, &st.u, &st.v_w, &st.r, &st.s, st.m_hist[i], f, sig, i,
+                b, p, &st.u, &st.v_w, &st.r, &st.s, Some(st.m_hist[i]), f, sig, i,
             );
         }
         // Terminated runs end in the aligned frame (sig = 0).
@@ -7585,7 +7590,7 @@ fn kaliski_backward_caps(
                 Some(st.f_flag)
             };
             kaliski_frame::frame_iter_backward(
-                b, p, &st.u, &st.v_w, &st.r, &st.s, st.m_hist[i], f, sig, i,
+                b, p, &st.u, &st.v_w, &st.r, &st.s, st.m_hist[i], f, sig, i, false,
             );
             continue;
         }
