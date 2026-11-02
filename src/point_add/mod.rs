@@ -3891,12 +3891,11 @@ fn mulmod(a: U256, b: U256, p: U256) -> U256 {
 /// (since max(r,s) doubles per iter starting from max=1, so max ≤ 2^iter_idx).
 /// In that range, mod_double(r)'s Solinas cadd is identity — replace with
 /// a plain shift (0 Toffoli) for ~255 CCX savings per iter.
-// Below this iteration index r is doubled without the mod-p correction. Before
-// termination the Kaliski invariant u*s + v*r = p (v >= 1) gives 2r' < p, so
-// the correction can only fire at or after the terminating step. Termination
-// for uniform inputs: mean 361.8, sd 9.5, min 318 over 2e5 samples, so 300 is
-// ~6 sd below the mean (much tighter than the 400/404 iteration caps).
-const R_SMALL_THRESHOLD: usize = 300;
+// Below this iteration index r is doubled without the mod-p correction.
+// Exact bound: s = u+v at least halves per step and starts above 2^255, so
+// every run needs >= 256 steps; iterations 0..254 are never the terminating
+// step, and before termination u*s + v*r = p (v >= 1) gives 2r' < p.
+const R_SMALL_THRESHOLD: usize = 255;
 
 fn r_small_threshold() -> usize {
     std::env::var("KAL_R_SMALL_THRESHOLD")
