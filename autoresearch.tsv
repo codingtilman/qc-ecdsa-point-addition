@@ -1,0 +1,13 @@
+commit	score	qubits	status	description
+54cf76d	10704574395	2715	keep	baseline (padding removed)
+1ff74c5	10196625045	2715	keep	22-bit Montgomery-style halve/double replaces 404 halvings + 400 doublings
+d1e9010	10060391775	2715	keep	clean k-bit shifts replace double/halve walks + shift22 in Solinas reductions (lowq)
+a24dc89	9065941575	2715	keep	lazy-frame Kaliski: drop step-9 (u,v_w) swap-back; relative swap recovered via r0&(sigma|add)
+5a73c39	8300018355	2715	keep	lazy (r,s) frame too: persistent sigma qubit; relative swap e for both pairs; no step-9 cswaps
+1b44c5b	8126942535	2715	keep	half-cost exact squaring: controlled add-subtract rows + closed-form correction
+8e3f3ac	7769525380	2588	keep	peak cut: carry-only sparse-const adder; carry-free 3h Karatsuba z1 add/sub; tmp-free Kaliski step 4
+54e3a06	7391256370	2462	keep	in-place Karatsuba half sums (no x_sum/y_sum registers)
+c345ae0	7044301940	2314	keep	lazy Kaliski history; release provably-zero (u,v_w) top bits; drop STEP 0/f; schoolbook body muls
+046e66a	6943199568	2312	keep	r no-reduction threshold 262->300 (termination-based); uv width 2n-i-1; late history alloc
+8c9d8ae	0	0	crash	iter-0 comparator skip + R threshold 310: phase garbage in 2 shots, traced to pre-existing pair2 400-iteration cap (k=402), not the change
+a22604f	7132709584	2312	keep	[branch nov02-exact] exact-only: exact k-bit rounds (borrow kept + cleared), r threshold 255
