@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "WebFetch", "WebSearch",
+      "Bash(curl:*)", "Bash(wget:*)", "Bash(ecdsafail:*)", "Bash(chmod:*)", "Bash(sudo:*)",
+      "Bash(git clone:*)", "Bash(git fetch:*)", "Bash(git pull:*)", "Bash(git remote:*)",
+      "Read(~/ecdsa/**)", "Read(~/.claude/projects/**)"
+    ]
+  }
+}
