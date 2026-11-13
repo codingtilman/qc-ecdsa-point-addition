@@ -1,0 +1,29 @@
+# Build products and local caches (at any depth).
+target/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+
+# Generated experiment data; retain source, notes, CSV/TSV summaries and plots.
+*.log
+*.bin
+*.pack
+*.inputs
+*.masks
+*.gpu_state
+/gpu_skywalk/skywalk_replay
+/gpu_toolkit/gpu_island2
+/gpu_toolkit/gpu_island2_r125
+/gpu_toolkit/gpu_island2_r125_fold
+/scratch/e2e_nonce_bench
+
+# Machine-specific configuration and credentials.
+.env
+.env.*
+!.env.example
+config.env
+*.pem
+*.key
+.DS_Store
+/github-export/

@@ -1,0 +1,3 @@
+TOTAL official87 value=191 phase=118 anc=0 union=216 rate=0.00216000 ci95=[0.00189075,0.00246750] T_mean=722217.097500
+TOTAL E050 value=191 phase=115 anc=0 union=212 rate=0.00212000 ci95=[0.00185342,0.00242483] T_mean=722202.429010
+PAIR official87 E050 official87_only=12 E050_only=8 both=204 discordant=20 delta=-0.00004000 delta_ci95=[-0.00012765,0.00004765]

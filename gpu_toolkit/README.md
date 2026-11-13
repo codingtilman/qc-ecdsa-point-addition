@@ -1,0 +1,515 @@
+# ecdsafail-island-gpu
+
+**GPU-accelerated Fiat-Shamir "island" search for the [ecdsa.fail](https://www.ecdsa.fail/) quantum point-addition challenge.**
+
+The challenge asks you to minimize `avg_executed_Toffoli × peak_qubits` for a reversible
+secp256k1 point-add circuit, validated against **9,024 hash-derived test inputs**. Almost
+every score improvement comes from *tightening a config lever* (narrowing a comparator,
+dropping a GCD iteration, truncating a register width) — but each tightening only stays
+correct on a lucky set of those 9,024 inputs. That lucky set is selected by a
+`DIALOG_TAIL_NONCE` (a free 96-gate identity tail that reseeds the inputs), and **after
+every lever change you must re-hunt a clean nonce.**
+
+Re-hunting by running the quantum simulator on candidate nonces is brutally slow
+(~minutes per nonce). This repo gives you a **bit-exact GPU port of the circuit's own
+classical pre-filter** that screens nonces ~1000× faster than the simulator, plus a
+shot-parallel CUDA kernel that's **7× faster than a naive GPU port** — turning a
+multi-hour island hunt into **minutes**.
+
+> It was built while taking the public leaderboard to a new SOTA by pushing
+> `DIALOG_GCD_ACTIVE_ITERATIONS` lower than anyone had — a lever that's only reachable
+> *because* the search is fast enough to find its rare islands. See `docs/levers.md`.
+
+---
+
+## What it does (and why it's fast)
+
+A "clean island" = a nonce whose 9,024 derived point-add inputs are all safe under your
+tightened config. The circuit ships a classical pre-filter (`dialog_gcd_classical_filter`,
+analysis-only, not called by `build()`) that classically replays the truncated K2
+binary-GCD transcript on both inversion factors of each input and rejects any nonce with a
+width-envelope overflow or non-convergence. This repo:
+
+1. **`dump_gpu_state.rs`** — exports a `gpu_state.bin` capturing everything the GPU needs:
+   the SHAKE256 prefix state (so the 96-op tail is the only per-nonce hashing), the
+   per-step width/compare/carry arrays (precomputed in Rust so the GPU stays integer-exact),
+   the windowed comb table, and the filter config. Its byte-exact Keccak is validated `==`
+   the `sha3` crate.
+2. **`gpu_island2.cu`** — a CUDA kernel that, per nonce, derives all 9,024 inputs (SHAKE256
+   → k1,k2 → comb `k·G` → point-add factors) and runs the GCD filter, with **one block per
+   nonce and 128 threads splitting the 9,024 shots** (cooperative squeeze in shared memory,
+   block-wide early-exit). ~**1,700 nonce/s/GPU** on an A100 (vs ~236/s naive).
+   It now checks the first GCD factor `dx = tx - ox` before constructing the second factor
+   `c = ox - rx`, so many dirty shots avoid the affine-add denominator inversion entirely.
+
+Throughput stacks across GPUs, so a ~1/1M-density island is ~5 minutes on 2×A100.
+
+**It is bit-exact.** A nonce reported `CLEAN` by the GPU is then quantum-confirmed with the
+real `eval_circuit` (the GCD filter doesn't model the apply phase, so ~9% of GCD-clean
+candidates fail the full 0/0/0 check — you confirm, then submit).
+
+---
+
+## Requirements
+
+- The challenge repo checked out locally (`ecdsafail clone` or `git clone`) + the
+  `ecdsafail` CLI logged in, and a working `ecdsafail run`. The Rust helpers build against
+  the repo's `quantum_ecc` crate. **Keep the repo + `ecdsafail` CLI on your laptop** — even
+  when the GPU is remote, only the search runs on the GPU box.
+- An **NVIDIA GPU + CUDA toolkit (`nvcc`)** — either local, or a rented box you `ssh` into
+  (vast.ai / Lambda / RunPod / CoreWeave / any). No GPU? `rust/island_search.rs` is a CPU
+  fallback (slower, but fine for low-density levers).
+- `python3` (score arithmetic), `perl` (CRLF-safe config edits — see Gotchas).
+
+### GPU support — portable across the whole NVIDIA lineup, single- or multi-GPU
+The kernel source is **architecture-agnostic** (plain integer ops, shared memory, atomics)
+and is **compiled on the target machine with its compute capability auto-detected**, so the
+same tool runs on:
+
+| class | examples | compute cap | arch |
+|---|---|---|---|
+| datacenter | **H200, H100** | 9.0 | sm_90 |
+| datacenter | **A100**, A30 | 8.0 | sm_80 |
+| workstation/consumer | **RTX 50** (5090/5080) | 12.0 | sm_120 |
+| | **RTX 40** (4090/4080) | 8.9 | sm_89 |
+| | **RTX 30** (3090/3080) | 8.6 | sm_86 |
+| older | V100 / T4 | 7.0 / 7.5 | sm_70 / sm_75 |
+
+`NVCC_ARCH=auto` (the default) detects the card and builds native SASS; if your CUDA
+toolkit is older than your GPU (e.g. a brand-new RTX 50), it **falls back to PTX that the
+driver JIT-compiles** so it still runs. `GPUS=auto` (default) **uses every GPU on the box**
+— the search range is split across all of them, one process pinned per device. Set
+`GPUS=N` or `NVCC_ARCH=sm_90` to pin explicitly.
+
+> The kernel was validated bit-exact on A100 (sm_80). Other arches use the same source and
+> the auto-detect/JIT build, so they compile and run unchanged — after `build`, always run
+> the quickstart sanity check (GPU must flag the base's known nonce as `CLEAN`).
+
+---
+
+## 60-second quickstart
+
+```bash
+git clone <this-repo> ecdsafail-island-gpu && cd ecdsafail-island-gpu
+
+# Local GPU:
+./island.sh init-local /path/to/ecdsafail-challenge      # detects GPU, builds the kernel
+
+# OR a remote GPU box (any provider) — just paste the ssh command your provider gave you:
+./island.sh init-remote "ssh -p 40162 ubuntu@1.2.3.4" /path/to/ecdsafail-challenge
+
+./island.sh install        # build the Rust helpers in the challenge repo
+./island.sh doctor         # shows the GPU(s), compute cap, and nvcc on the target
+```
+
+`init-*` writes `config.env`, runs `doctor`, and compiles the kernel (auto-arch, all GPUs).
+Now confirm the port is correct **for your current base** by checking it flags the base's
+*known* clean nonce (read it from `mod.rs`: `DIALOG_TAIL_NONCE`):
+
+```bash
+./island.sh dump "" /tmp/base.bin                 # dump for the CURRENT (unchanged) config
+./island.sh search /tmp/base.bin <known_nonce> 1  # MUST print: CLEAN nonce=<known_nonce>
+```
+
+If that prints `CLEAN`, you're wired up correctly. Now hunt an island for a tighter config:
+
+```bash
+# one command: measure the lever, dump, GPU-search, and quantum-confirm candidates
+./island.sh hunt DIALOG_GCD_ACTIVE_ITERATIONS=258 1 2000000
+# -> prints "CLEAN nonce=12345 tof=... qubits=1309 score=..." for any fully-clean island
+```
+
+Bake the winner (CRLF-safe) and submit:
+
+```bash
+./island.sh bake DIALOG_GCD_ACTIVE_ITERATIONS 258 DIALOG_TAIL_NONCE 12345
+# -> shows a clean 2-line diff and the ecdsafail run score
+cd $CHALLENGE && ecdsafail submit --note-file note.md --model "..." --claimed-score <score>
+```
+
+---
+
+## The workflow, step by step
+
+| step | command | what it does |
+|---|---|---|
+| 1. install | `./island.sh install` | drop `dump_gpu_state`, `count_tof`, `island_search` into `CHALLENGE/src/bin`, build |
+| 2. pick a lever | `./island.sh measure DIALOG_GCD_ACTIVE_ITERATIONS=258` | print exact Toffoli (CCX) for baseline vs the tighter config → `Δ × peak` = your score win |
+| 3. build kernel | `./island.sh build` | `nvcc` the kernel (local, or scp+build on your remote box) |
+| 4. dump | `./island.sh dump DIALOG_GCD_ACTIVE_ITERATIONS=258 s.bin` | encode the GCD filter+comb+prefix for that config |
+| 5. search | `./island.sh search s.bin 1 2000000` | GPU-screen 2M nonces → `CLEAN nonce=...` candidates |
+| 6. optional obligations | `./island.sh obligations check "<CFG>" obligations.txt cands.log obligation.log 8` | exact manifest-driven partial prefilter on GPU-emitted candidates |
+| 7. optional stage 2 | `./island.sh stage2 DIALOG_GCD_ACTIVE_ITERATIONS=258 cands.log stage2.log 8` | exact validator-backed prefilter on GPU-emitted candidates |
+| 8. validate | `./island.sh validate DIALOG_GCD_ACTIVE_ITERATIONS=258 <n>...` | quantum-confirm 0/0/0 + print score |
+| 9. bake | `./island.sh bake DIALOG_GCD_ACTIVE_ITERATIONS 258 DIALOG_TAIL_NONCE <n>` | CRLF-safe edit + `ecdsafail run` |
+| 10. submit | `ecdsafail submit ...` | (in the challenge repo) |
+
+`./island.sh hunt CFG START N` chains the original measure/dump/search/full-validate path.
+Use `search | tee cands.log` plus `stage2` explicitly when you want the two-stage pipeline.
+See `examples/walkthrough.md`.
+
+### Experimental search-kernel knobs
+The default search path preserves the previous release's `gpu_island2` behavior:
+`GPU_BATCH_INV=0 GPU_COMB_BITS=8 GPU_GCD_MODE=full_first GPU_WAVE=128 GPU_FAN_BITS=0`.
+
+To force this branch to match the previous release's search behavior, set the knobs explicitly
+and clear older aliases that can override them:
+
+```bash
+unset BATCH_INV GPU_LARGE_COMB GCD_MODE WAVE
+GPU_BATCH_INV=0 GPU_COMB_BITS=8 GPU_GCD_MODE=full_first GPU_WAVE=128 GPU_FAN_BITS=0 \
+  ./island.sh search s.bin <START> <N>
+```
+
+This matches the previous release's candidate behavior; on the RTX 5090 comparison run, a
+previous-release binary measured ~10,057 nonce/s and this branch with these knobs measured
+~10,062 nonce/s on the same dumped state. If you also want validation to behave like the
+previous release, set `EVAL_FAST_REJECT=0`; `island.sh validate` otherwise defaults it to
+`1` for faster dirty-candidate rejection.
+
+Set any of these on `./island.sh search` or `./island.sh hunt`; local and remote modes both
+forward them to the GPU binary:
+
+```bash
+GPU_BATCH_INV=1 GPU_WAVE=128 ./island.sh search s.bin 1 2000000
+GPU_COMB_BITS=16 ./island.sh search s.bin 1 2000000
+GPU_BATCH_INV=1 GPU_COMB_BITS=22 ./island.sh search s.bin 1 2000000
+GPU_GCD_MODE=trunc_first ./island.sh search s.bin 1 2000000
+```
+
+| option | values | effect |
+|---|---|---|
+| `GPU_BATCH_INV` | `0`/`1` | `1` launches the cooperative block kernel that batch-inverts the two Jacobian `Z` values and the affine-add denominator across a wave. Exact candidate set. |
+| `GPU_COMB_BITS` | `8`/`16`/`20`/`22` | Larger values build runtime fixed-base comb tables from the dumped 8-bit table. `16` is ~64 MiB, `20` is ~832 MiB, and `22` is ~3.0 GiB. Exact candidate set; larger tables trade VRAM and startup time for fewer scalar-mul additions. |
+| `GPU_GCD_MODE` | `full_first`, `trunc_first`, `single_pass`, `trunc_only` | `full_first` is the default. `trunc_first` is the safer fast mode: it runs the truncated width-envelope check first, then still runs the full untruncated convergence check, so it preserves the baseline GCD filter while sometimes rejecting hard factors earlier. `single_pass` folds those checks into one truncated walk; after the 1221-qubit SOTA update it is **experimental only** because it missed the baked clean nonce `165002130437`. `trunc_only` is a noisy prefilter that can emit extra false positives, so always validate. |
+| `GPU_WAVE` | `32`..`256` | CUDA block threads per nonce wave. Default `128`; values are rounded up to a warp multiple and capped at `256`. |
+| `GPU_FAN_BITS` | `0`..`26` | Nonce-fan: precompute the SHAKE sponge for the low `K` tail bits so each nonce only absorbs its high bits. `0` = off. Exact candidate set. Table is `2^K * 208 B` (`K=20`≈208 MiB, `K=24`≈3.5 GiB). Measured gain is small (~+1.5% on the current SOTA base — `squeeze_init` is not the bottleneck there); may help more on init-bound bases. |
+| `EVAL_FAST_REJECT` | `0`/`1` | **Phase-2 (CPU validate) knob, not a scan knob** — no-op on a `search` line. `1` defers the per-shot EC-muls into the batch loop and stops at the **first failing shot**. Speedup is candidate-dependent: early-failing dirty candidates ~1.9s, but GCD-clean-but-eval-dirty ones (what the GPU hunt feeds the validator) fail later → ~6s; vs ~17s stock (~2.6–8.5×). Exact — clean islands still read `0/0/0` and take the full ~17s; with the var unset the eval is byte-identical, so `ecdsafail run` scoring is unaffected (default `0`). `island.sh validate` sets it to `1`. **Setup:** apply `patches/eval_stage2_prefilter.diff` + `cargo build --release --bin eval_circuit` (reset by `ecdsafail sync`; `eval_circuit.rs` is a local tool, not submitted). Per-candidate context: `build_circuit` is only ~1.2s, so the whole per-candidate cost is this eval. |
+| `EVAL_SHOT_LIMIT` / `EVAL_STAGE2_SHOTS` | `1..9024` | **Stage-2 shot-count knob.** Stage 2 defaults to full 9024-shot eval with early reject. Lower values, such as `512`, turn it into a trusted prefix prefilter; partial runs do not write `score.json` / `results.tsv`. A failure on any checked shot is an exact rejection. A `stage2-pass` at `shots=9024` has passed the full eval shot set; a pass at a lower shot count is only a survivor for later full validation. |
+| `VALIDATE_REUSE_OPS` | `0`/`1` | **Build-cache validation knob.** `1` builds one nonce-0 `ops.bin` per validator process and evaluates every requested nonce by overriding only the Fiat-Shamir identity-tail hash with `EVAL_TAIL_NONCE`. This avoids the expensive `build_circuit` call for every candidate. Exact because the tail is 48 `X;X` identity pairs; only the serialized tail targets reseed SHAKE. Requires `patches/eval_stage2_prefilter.diff`. |
+| `STAGE2_BATCH` | deprecated | Ignored by `stage2`. Stage 2 now builds one nonce-0 `ops.bin` for the whole invocation, then evaluates one candidate nonce per worker using `EVAL_TAIL_NONCE`. Use the `JOBS` argument or `STAGE2_JOBS` to control parallelism. |
+| `VALIDATE_RESULTS_LOG` | path | Optional validate-only durable ledger. When set, `island.sh validate` still prints every line to stdout, and also appends successful `dirty` / `CLEAN` / `stage2-*` verdict lines to this file under `flock` when available. |
+| `VALIDATE_ERRORS_LOG` | path | Optional validate-only error ledger. `ERROR ... stage=build/eval ...` lines are routed here instead of `VALIDATE_RESULTS_LOG`; defaults to `errors.log` next to `VALIDATE_RESULTS_LOG`. Error nonces are retryable and should not be counted as validated. |
+| `VALIDATE_LOCK_FILE` | path | Optional shared lock path for `VALIDATE_RESULTS_LOG` / `VALIDATE_ERRORS_LOG` appends. Defaults to `<VALIDATE_RESULTS_LOG>.lock`. |
+| `OBLIGATION_SHOTS` | `1..9024` | Shot count for the manifest-driven obligation checker. Defaults to `9024`. A rejection is only as strong as the audited obligation and checked shot count. |
+| `OBLIGATION_BATCH` | integer | Number of nonces per `obligation_filter` process. Defaults to `64`, so each process builds the circuit context once and amortizes it over a small batch. |
+| `OBLIGATION_JOBS` | integer | Parallel worker count for `./island.sh obligations check`; otherwise the stage2/default CPU count is used. |
+| `OBLIGATION_ERRORS_LOG` | path | Retryable errors from `obligation_filter`; defaults to `obligation-errors.log` next to the obligation results log. |
+
+**Every improvement is an independent on/off knob** (all default to the conservative/exact baseline): `GPU_BATCH_INV`, `GPU_COMB_BITS`, `GPU_GCD_MODE` (`trunc_first` is the safer fast choice; `single_pass` is experimental), `GPU_WAVE`, `GPU_FAN_BITS`, `EVAL_FAST_REJECT`, `VALIDATE_REUSE_OPS`, and the optional validation ledger paths. They compose; benchmark combinations with `bench-gpu-knobs`.
+
+For distributed validation, keep the verdict ledger clean and route build/eval failures to a
+separate retry ledger:
+
+```bash
+VALIDATE_REUSE_OPS=1 \
+VALIDATE_RESULTS_LOG=/root/<route>_validation/results.log \
+VALIDATE_ERRORS_LOG=/root/<route>_validation/errors.log \
+  ./island.sh validate "$CFG" <nonce...>
+```
+
+Recommended safer scan settings on the RTX 5090:
+
+```bash
+GPU_BATCH_INV=1 GPU_COMB_BITS=22 GPU_GCD_MODE=trunc_first GPU_WAVE=128 GPU_FAN_BITS=22 \
+  ./island.sh search s.bin <START> <N>
+```
+
+For the accepted TrailMix-ludicrous circuit family (`bdb1d22`, submitted
+`DIALOG_TAIL_NONCE=28565`), use the dedicated jump-GCD schedule filter:
+
+```bash
+GPU_FILTER=ludicrous GPU_BATCH_INV=1 GPU_COMB_BITS=22 GPU_WAVE=128 GPU_FAN_BITS=22 \
+  ./island.sh search s.bin <START> <N>
+```
+
+The `ludicrous` filter replays the product-min `SCHED_J2`/`GAP_J2` jump=2 GCD
+schedule. It replaces the old dialog-GCD prefilter for that circuit. The older
+`GPU_FILTER=trailmix` / `GPU_TRAILMIX_THIN=1` mode targets a different
+TrailMix-thin/shrunken-PZ schedule and should not be used for `trailmix_ludicrous`.
+As usual, first smoke-test the known clean nonce:
+
+```bash
+GPU_FILTER=ludicrous ./island.sh search s.bin 28565 1
+```
+
+It must print `CLEAN nonce=28565` before larger scans are trusted.
+
+`GPU_FILTER=ludicrous` is intentionally only a GCD prefilter. For high-density
+TrailMix-ludicrous hunts, add a second exact prevalidation stage on the emitted
+candidates:
+
+```bash
+# Save the raw scan stream.
+GPU_FILTER=ludicrous ./island.sh search s.bin <START> <N> <CHUNK> | tee cands.log
+
+# Exact stage-2 rejection on candidates only. The default checks all 9024
+# Fiat-Shamir shots, uses EVAL_FAST_REJECT=1, builds one nonce-0 ops.bin for
+# the whole invocation, and streams a durable results log.
+./island.sh stage2 "<CFG>" cands.log stage2.log 8
+
+# Optional faster triage mode: check only a trusted prefix before full validation.
+EVAL_STAGE2_SHOTS=512 ./island.sh stage2 "<CFG>" cands.log stage2-prefix.log 8
+
+# Full validation is still required for survivors.
+grep '^stage2-pass nonce=' stage2.log | sed -E 's/.*nonce=([0-9]+).*/\1/' \
+  | xargs ./island.sh validate "<CFG>"
+```
+
+This is no-false-negative in the useful sense: stage 2 rejects only after the
+trusted evaluator observes a real circuit violation on a checked shot. It never
+uses random heuristics or a tightened CUDA GCD condition. With the default
+`EVAL_STAGE2_SHOTS=9024`, a `stage2-pass` means the nonce passed the full eval shot set.
+With a smaller `EVAL_STAGE2_SHOTS`, a `stage2-pass` only means "not rejected by this exact
+prefix"; only a full 9024-shot result is submit-safe.
+Known clean nonces must pass stage 2 before trusting a new patched validator.
+Rejected lines may show `shots<9024` because `EVAL_FAST_REJECT=1` stops at the first
+failing 64-shot batch; `stage2-pass` lines have checked the requested shot count. Re-running
+`stage2` against the same results log is resumable: already logged nonces are skipped.
+
+For full validation batches, the same build cache can be used directly:
+
+```bash
+VALIDATE_REUSE_OPS=1 ./island.sh validate "<CFG>" <nonce1> <nonce2> ...
+```
+
+This should be the default for large remote validation batches once the patched
+`eval_circuit` binary is installed. If the binary does not contain
+`EVAL_TAIL_NONCE` support, `island.sh` refuses `VALIDATE_REUSE_OPS=1` rather than
+silently validating every nonce against the nonce-0 input stream.
+
+### Exact obligation manifests: stable partial filtering
+
+Some false positives are not GCD failures at all: they are exact circuit obligations such
+as a dropped carry bit, a narrowed comparator window, a pseudo-Mersenne fold overflow, or a
+phase-tail control that the full evaluator discovers later. The stable way to prefilter
+those without hand-porting every new circuit is to let the circuit-builder side emit a
+small manifest of exact obligations, then run a generic checker over the Fiat-Shamir
+shot values.
+
+This branch includes that first generic layer:
+
+```bash
+# Emits an empty universal-safe manifest with the supported line formats.
+./island.sh obligations emit-default obligations.txt
+
+# Optional legacy dialog-GCD manifest; only use for circuits whose GCD schedule is
+# represented by DialogGcdFilterConfig, and always smoke-test known clean nonces.
+./island.sh obligations emit-dialog-gcd dialog-gcd-obligations.txt
+
+# TrailMix-ludicrous/product-min safe manifest. This checks exact top-level
+# ec_add pseudo-Mersenne +f/-f fold no-escape obligations only.
+./island.sh obligations emit-trailmix-ludicrous trailmix-ludicrous-obligations.txt
+
+# Run exact manifest checks on candidate logs; pass/reject lines are durable and resumable.
+OBLIGATION_SHOTS=9024 OBLIGATION_BATCH=64 \
+  ./island.sh obligations check "<CFG>" obligations.txt cands.log obligation.log 8
+```
+
+Manifest lines are intentionally simple and fail closed if unknown:
+
+```text
+gcd_factor_fits <name> <tx|ty|ox|oy|rx|ry|dx|dy|c>
+high_zero <name> <value> <keep_bits>
+low_eq <name> <left> <right> <bits>
+compare_window_agrees <name> <left> <right> <lo> <width>
+add_no_carry <name> <left> <right> <bits>
+sub_no_borrow <name> <left> <right> <bits>
+nonzero <name> <value>
+trailmix_top_level_fold_exact <name>
+```
+
+No-false-negative rule: add a line only when it is an exact obligation of the submitted
+circuit, not a statistical shortcut. For example, if the builder drops a carry beyond bit
+`k`, it can emit an `add_no_carry` obligation for the exact low-limb expression that must
+not carry. If a comparator is narrowed to a top window, it can emit
+`compare_window_agrees` for that exact window. The checker is route-stable because it only
+knows generic point-add shot values (`tx`, `ty`, `ox`, `oy`, `rx`, `ry`, `dx`, `dy`, `c`)
+and generic predicates; circuit-specific meaning lives in the manifest. Known clean
+submitted nonces must pass a new manifest before it is trusted in production.
+
+For the f5c7775 q1162 TrailMix-ludicrous circuit, `emit-trailmix-ludicrous` emits one
+active manifest line: `trailmix_top_level_fold_exact`. It checks only the top-level
+`ec_add` coordinate primitive fold obligations from the submitted product-min builder:
+`x2 -= ox`, `y2 -= oy`, the `x2 += ox; temp = 2*ox; x2 += 2*ox` chain, `y2 -= oy`, and
+`x2 -= ox` before the final negate. A nonce is rejected only when the required +f/-f
+pseudo-Mersenne correction would carry or borrow out of the low `PAD + F_BITLEN` limb, which
+is a hard dropped-bit violation. The known-clean f5c7775 nonce `168011267` passes this
+manifest over all 9024 shots. Internal jump-GCD apply/phase effects are intentionally not
+replayed by this manifest; use `./island.sh stage2` with `EVAL_STAGE2_SHOTS=9024` for the
+full exact evaluator path on that family.
+
+On the 2026-06-10 1221-qubit SOTA (`155ebc5` / local commit `572bba4`), this found the baked
+clean nonce and measured about **12.3k nonce/s** on the RTX 5090 (`~1.2x` the previous-release
+baseline). `fan22`'s ~872 MiB table builds in only ~0.3s (measured), so at the default 500k
+chunk it amortizes cleanly. Drop to `GPU_FAN_BITS=0` only for tiny chunks (≪200k). For
+long/billion-scale runs raise `CHUNK` to ~1M (startup overhead drops to ~1.3%).
+
+**Overall speedup:** scan and eval are *sequential* stages, so the scan knobs (≤1.65×) and the eval lazy fast-reject (~8.5×) **don't multiply** — combined end-to-end is **up to ~8.5×** where candidate validation dominates (apply-bound configs) and **~1.6×** where the GPU scan dominates (the current frontier base). See [`docs/measured-speedups.md`](docs/measured-speedups.md) for the full breakdown.
+
+**Chunk size is a throughput knob, not a correctness one.** An earlier note here claimed the `GPU_BATCH_INV=1` + `GPU_COMB_BITS=22` + `GPU_FAN_BITS` combo "corrupts its output over a very large single launch." **That was a misdiagnosis — re-verified, the combo is deterministic and scale-invariant** (identical candidates at 200k / 1M / 6M; a 6M run reproduces bit-for-bit; no mutable global state is read per-nonce, so a verdict *cannot* depend on launch size). The startup/table-build cost is only ~1s even for the 3 GiB comb22 + fan22, so `CHUNK` is chosen purely to amortize that (~6% at 200k, ~1.3% at 1M) and to fit GPU memory — **for long runs use `CHUNK≈1000000`.** The only real large-*single*-launch caveat is benign: the `MAXOUT=4096` output buffer silently truncates (guarded — not corruption) a launch that finds >4096 candidates, which chunked search never approaches. See `docs/measured-speedups.md` → "Per-process startup cost & chunk sizing".
+
+**`single_pass` is not a production-safe drop-in replacement for `full_first` or `trunc_first`.**
+It models convergence on the *truncated* GCD walk, while the baseline convergence check is
+untruncated. Older ranges only showed extra eval-dirty false positives, but the 1221-qubit SOTA
+exposed a false negative: `single_pass` missed the baked clean nonce `165002130437`. Use
+`trunc_first` for the fast production scan, and keep `single_pass` for experiments that are
+separately validated against a known-clean nonce and a candidate-dense range.
+
+Before trusting a new GPU build, run the integrated correctness smoke:
+
+```bash
+./island.sh test-gpu-knobs "" 0 4096
+```
+
+It rebuilds the helper binaries, builds the CUDA kernel, dumps the current state, checks the
+GPU Keccak probe, verifies that every knob still finds the baked `DIALOG_TAIL_NONCE`, and
+compares exact candidate sets over the requested range, including the combined exact paths
+used by the benchmark. Use `ISLAND_CONFIG=/tmp/box.env` to point the same repo at a one-off
+remote GPU without editing the tracked `config.env`.
+
+Large comb tables are opt-in for the smoke test so normal runs do not allocate GiB of VRAM:
+
+```bash
+GPU_TEST_COMB_BITS="20 22" ./island.sh test-gpu-knobs "" 0 1024
+```
+
+To validate speedups after correctness passes, run the fixed-range throughput benchmark:
+
+```bash
+GPU_BENCH_RUNS=3 GPU_BENCH_WARMUPS=1 ./island.sh bench-gpu-knobs "" 0 16384
+```
+
+This dumps the current SOTA state once, uploads it once in remote mode, warms up each
+variant, then runs the raw `gpu_island2` binary over the same nonce interval and prints
+average/min/max `nonce/s` plus speedup relative to the default baseline. The default
+benchmark variants include isolated knobs (`trunc_first`, `single_pass`, `wave64`, `wave256`,
+`batch_inv`, `comb16`) and combined paths (`batch_wave256`, `batch_comb16`,
+`batch_comb16_single`, `all_exact`). Treat any `single_pass` variant as experimental until it
+passes a known-clean nonce check on the current base. Use `GPU_BENCH_SKIP_INSTALL=1` or `GPU_BENCH_SKIP_BUILD=1` when the Rust
+helpers or CUDA binary are already fresh.
+
+Benchmark large comb tables explicitly:
+
+```bash
+GPU_BENCH_COMB_BITS="20 22" GPU_BENCH_RUNS=2 ./island.sh bench-gpu-knobs "" 0 32768
+```
+
+On the RTX 5090 current SOTA base, the best measured exact mode was
+`GPU_BATCH_INV=1 GPU_COMB_BITS=22 GPU_WAVE=128`: about `13,622 nonce/s` over `[0, 32768)`,
+roughly `2.8%` faster than `batch_comb16` on the same run. Treat this as a small tuning
+gain, not a new order-of-magnitude path.
+
+Interpretation caveats:
+
+- Run `test-gpu-knobs` first; speed is only meaningful for variants that preserve the
+  expected candidate set, except intentionally noisy modes.
+- Use a fixed challenge commit, config, start nonce, and range size for every comparison.
+- Warmups matter on new cards or old toolkits because PTX may be JIT-compiled on the first
+  run.
+- The benchmark measures single-process kernel throughput. Multi-GPU scheduling speed is
+  still best checked with `./island.sh search`.
+- For `GPU_COMB_BITS>8`, the one-time table construction cost is outside the timed CUDA
+  event, so also check wall-clock behavior for very small chunks.
+
+### Local vs remote GPU
+`init-local` / `init-remote` set this up for you. In remote mode, `build`/`search`/`doctor`
+automatically `scp` the kernel + runtime scripts + the (tiny, ~515 KB) state dump into a
+working dir under the remote home (`~/.ecdsafail_island`, so it works for `ubuntu@`, `root@`,
+any user) and run over SSH; the Rust steps (`dump`/`validate`, which need the challenge repo)
+stay on your laptop. You keep the repo + `ecdsafail` CLI local and rent GPUs only for the
+search. Arch is auto-detected on the remote, so you don't need to know the card's `sm_XX`.
+The script can be invoked as either `./island.sh ...` or `bash island.sh ...`; internal
+self-calls resolve through the script directory.
+
+**Long unattended searches:** an `init`+`search` over millions of nonces holds the SSH
+connection open for the duration. For multi-hour runs, wrap the node-side search in `tmux`/
+`screen` (or split the range and run several `./island.sh search` calls).
+
+---
+
+## Using it inside an autoresearch / agent harness
+
+The CLI is the integration surface — your harness (or an AI agent) drives the loop:
+
+```
+measure many candidate levers  ->  pick the biggest score win that's plausibly findable
+  ->  hunt an island for it     ->  if a 0/0/0 island is found, bake + submit
+  ->  on a new SOTA from others, `ecdsafail sync` and repeat on the new base.
+```
+
+There's a Claude-Code / agent **skill** in [`SKILL.md`](SKILL.md): copy this folder to
+`~/.claude/skills/ecdsafail-island/` (or point your harness at it) and the agent can invoke
+"find me an island for `DIALOG_GCD_...=X`" as a tool. The skill encodes the
+measure→search→validate→bake loop and the gotchas below.
+
+**Natural-language remote setup.** With the skill installed, you can just tell the agent in
+plain language: *"Run the search on a remote GPU machine — here's the ssh command:
+`ssh -p 40162 ubuntu@1.2.3.4`."* The agent turns that into
+`./island.sh init-remote "ssh -p 40162 ubuntu@1.2.3.4" <challenge>`, which provisions the
+box (detects the GPU(s), builds the kernel) and runs every subsequent search there — no
+manual `sm_XX` / multi-GPU wiring needed.
+
+**Key principle for the harness:** *measure every lever's true Toffoli cost first* (step 2)
+and target the biggest, least-contested one — don't just push whatever lever you searched
+last time. `docs/levers.md` catalogs the levers and their measured per-unit Toffoli cost.
+
+---
+
+## Gotchas (these cost real time — read them)
+
+- **CRLF line endings.** `mod.rs` uses CRLF. Editing it with a tool that rewrites line
+  endings (most editors / IDE "format on save" / naive sed) corrupts the touched region
+  into a huge diff that **fails leaderboard promotion** even when the score is correct.
+  Always edit config with `perl`/`./island.sh bake`, and verify `git diff` is *exactly* your
+  changed lines (the `bake` command checks the CR count for you).
+- **Validate before you trust.** The GPU filter models the GCD only (width + convergence),
+  not the apply phase. A `CLEAN` from the GPU is a *candidate* — always `validate` (real
+  `eval_circuit`) before submitting. ~9% of candidates pass; you need ~10 per winner.
+- **Re-validate the port on each new base.** After `ecdsafail sync` to a new SOTA base,
+  re-run the quickstart sanity check (GPU must flag the base's known nonce as `CLEAN`). The
+  dump reads the filter config dynamically, so it tracks bases that keep the dialog-GCD
+  architecture — but confirm, don't assume.
+- **Stale binaries.** `cargo build --bin A --bin B` aborts *all* targets if one is missing.
+  Then `build_circuit`/`eval_circuit` silently stay stale from the previous base. Always
+  confirm `ecdsafail run` equals the leaderboard score after `install`.
+- **Remote process management.** For long unattended searches, run the node loop inside a
+  `tmux`/`screen` or a backgrounded ssh that stays connected — detached `setsid &` jobs do
+  not reliably survive on some rented boxes. `kill -9` on a running kernel is *pending*
+  until that kernel returns.
+
+---
+
+## Layout
+
+```
+island.sh              unified CLI (init-local/init-remote/doctor/install/measure/build/
+                                     dump/search/validate/bake/hunt)
+config.env.example     reference config (init-* writes config.env for you)
+SKILL.md               agent/Claude-Code skill manifest
+CHANGELOG.md           decision log for major search changes, rationale, expected impact
+runtime/               scripts that run ON the GPU machine (local or scp'd to the remote):
+  build_kernel.sh        auto-detect compute cap -> nvcc (native + PTX-JIT fallback)
+  search_driver.sh       multi-GPU parallel chunked search (splits range across all GPUs)
+  remote_gpu_scan_loop.sh long-running per-node scan loop with status/candidate files
+  doctor.sh              report GPUs / compute cap / nvcc
+cuda/
+  gpu_island2.cu       PRODUCTION shot-parallel kernel (KERNEL2=1)
+  gpu_island.cu        reference serial kernel (for cross-checking)
+rust/
+  dump_gpu_state.rs    exports gpu_state.bin (Keccak validated == sha3)
+  count_tof.rs         static Toffoli (CCX) lever meter
+  island_search.rs     CPU reference searcher (no-GPU fallback)
+docs/
+  1216-balanced.md     current 1216-qubit balanced scan/validation recipe
+  how-it-works.md      the dialog-GCD circuit + island search, explained
+  levers.md            the lever catalog + measured Toffoli costs
+  kernel-notes.md      kernel design / throughput / validation notes
+  theory-knobs.md      theoretical background for the experimental GPU knobs
+examples/
+  walkthrough.md       end-to-end example (lower ACTIVE_ITERATIONS, find island, submit)
+```
+
+## License
+MIT — see `LICENSE`. Not affiliated with ecdsa.fail; built by challenge participants.
+Contributions welcome (more kernels, batch inversion, other GPU vendors).

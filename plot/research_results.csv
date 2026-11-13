@@ -1,0 +1,7 @@
+version,commit,score,union_failures_per_100000,official_local_pass
+Baseline,667ce8d4,896396908,204,True
+E040,57a62d9e,893766672,641,False
+E046,49eb0909,893028824,1854,False
+Official87,87f0aaf3,890917150,216,True
+E052,6ac627e5,890897406,214,False
+E056,e50c8152,890907278,210,False

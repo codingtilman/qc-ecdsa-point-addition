@@ -1,0 +1,15 @@
+[package]
+name = "skywalk_gpu_pack"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+alloy-primitives = "1.5.7"
+quantum_ecc = { path = "../r125_opt" }
+sha3 = "0.10.8"
+zstd = "0.13.3"
+
+[[bin]]
+name = "r125_fast_state"
+path = "../gpu_toolkit/rust/dump_gpu_state.rs"
+

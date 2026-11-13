@@ -1,0 +1,10 @@
+TOTAL original value=181 phase=106 anc=0 union=204 rate=0.00204000 ci95=[0.00177883,0.00233943] T_mean=721392.894550
+TOTAL official87 value=191 phase=118 anc=0 union=216 rate=0.00216000 ci95=[0.00189075,0.00246750] T_mean=722217.097500
+TOTAL E040 value=618 phase=326 anc=0 union=641 rate=0.00641000 ci95=[0.00593398,0.00692394] T_mean=722178.304960
+TOTAL E046 value=1836 phase=914 anc=0 union=1854 rate=0.01854000 ci95=[0.01772224,0.01939475] T_mean=721579.795450
+PAIR original official87 original_only=98 official87_only=110 both=106 discordant=208 delta=0.00012000 delta_ci95=[-0.00016267,0.00040267]
+PAIR original E040 original_only=14 E040_only=451 both=190 discordant=465 delta=0.00437000 delta_ci95=[0.00394822,0.00479178]
+PAIR original E046 original_only=13 E046_only=1663 both=191 discordant=1676 delta=0.01650000 delta_ci95=[0.01570415,0.01729585]
+PAIR official87 E040 official87_only=104 E040_only=529 both=112 discordant=633 delta=0.00425000 delta_ci95=[0.00375759,0.00474241]
+PAIR official87 E046 official87_only=102 E046_only=1740 both=114 discordant=1842 delta=0.01638000 delta_ci95=[0.01554496,0.01721504]
+PAIR E040 E046 E040_only=14 E046_only=1227 both=627 discordant=1241 delta=0.01213000 delta_ci95=[0.01144365,0.01281635]

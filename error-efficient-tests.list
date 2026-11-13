@@ -1,0 +1,37 @@
+point_add::leapfrog::a2_divmul_tests::a2_divmul: test
+point_add::leapfrog::a2_fused_tests::a2_fused_identity: test
+point_add::leapfrog::a2_paychain_tests::a2_paychain: test
+point_add::leapfrog::a2_walk_tests::a2_walk_letters: test
+point_add::leapfrog::prof::leapfrog_prim_costs: test
+point_add::leapfrog::tests::leapfrog_bisect: test
+point_add::leapfrog::tests::leapfrog_divide: test
+point_add::leapfrog::tests::leapfrog_divp1: test
+point_add::leapfrog::tests::leapfrog_merged_prims: test
+point_add::leapfrog::tests::leapfrog_multiply: test
+point_add::leapfrog::tests::leapfrog_official_lambda: test
+point_add::leapfrog::tests::leapfrog_official_paired: test
+point_add::leapfrog::tests::leapfrog_parts: test
+point_add::leapfrog::tests::leapfrog_point_add: test
+point_add::leapfrog::tests::leapfrog_prims: test
+point_add::leapfrog::tests::leapfrog_tie_unit: test
+point_add::leapfrog::tests::leapfrog_trace: test
+point_add::leapfrog::y15::a2_r1_tests::a2_r1_rail8_exact: test
+point_add::leapfrog::y15::a2_rail8_tests::a2_rail8_exact: test
+point_add::leapfrog::y15::a2_rot_tests::a2_rot8_exact: test
+point_add::leapfrog::y15::a2_rot_tests::rot_s6_exact: test
+point_add::leapfrog::y15::a2_tick_tests::a2_tick_one: test
+point_add::leapfrog::y15::a_tests::a_fold_fwd_exact: test
+point_add::leapfrog::y15::a_tests::a_fold_inv_exact: test
+point_add::leapfrog::y15::f_tests::f_fold_drops: test
+point_add::leapfrog::y15::f_tests::f_fold_e3: test
+point_add::leapfrog::y15::f_tests::f_fold_exhaustive: test
+point_add::leapfrog::y15::f_tests::f_fold_inv_drops: test
+point_add::leapfrog::y15::f_tests::f_fold_levels: test
+point_add::leapfrog::y15::f_tests::f_fold_one: test
+point_add::leapfrog::y15::f_tests::f_fold_random: test
+point_add::leapfrog::y15::f_tests::f_page5_local: test
+point_add::leapfrog::y15::f_tests::w118_final_drop_budget8: test
+point_add::sqleaf::tests::sqleaf_unit: test
+point_add::square::g3_tests::g3_square_unit: test
+
+35 tests, 0 benchmarks
