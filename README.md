@@ -1,6 +1,6 @@
 # ECDSA Research
 
-> **Branch `leaderboard-E056`.** Experiment and code by Chen Yuguo. The baseline/ and official_* folders contain the public ECDSA.Fail leaderboard circuit (Layr-Labs/ecdsafail-challenge, commit 87f0aaf3) as the starting point; only the E0xx variants are our modifications.
+> **Branch `leaderboard-E056`.** Experiment and code by Chen Yuguo, building on the public ECDSA.Fail leaderboard circuit (Layr-Labs/ecdsafail-challenge, commit 87f0aaf3). The folder official_87f0aaf3/ is the unmodified upstream circuit; the other circuit folders are derived variants used in the experiment.
 
 Research on reversible **secp256k1 point-addition circuits**, resource-cost optimization, and GPU-assisted validation for the ECDSA Fail challenge. This repository collects circuit implementations, optimization experiments, GPU validation tools, and research findings on the trade-off between quantum resource cost and circuit correctness.
 
